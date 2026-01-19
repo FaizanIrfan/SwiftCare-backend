@@ -1,15 +1,67 @@
 const mongoose = require('mongoose');
 
-const appointmentSchema = new mongoose.Schema({
-  doctorName: String,
-  day: String,
-  date: String,
-  time: String,
-  bookingFor: String,
-  gender: String,
-  age: String,
-  problem: String,
-}, { timestamps: true });
+const appointmentSchema = new mongoose.Schema(
+  {
+    patientId: {
+      type: String,
+      required: true
+    },
 
-// ⚡ IMPORTANT: third argument = existing collection name
-module.exports = mongoose.model("Appointment", appointmentSchema, "appointments");
+    doctorId: {
+      type: String,
+      required: true
+    },
+
+    doctorName: {
+      type: String
+    },
+
+    day: {
+      type: String
+    },
+
+    date: {
+      type: String   // "19 Mar"
+    },
+
+    time: {
+      type: String
+    },
+
+    bookingFor: {
+      type: String
+    },
+
+    gender: {
+      type: String
+    },
+
+    age: {
+      type: String
+    },
+
+    problem: {
+      type: String
+    },
+
+    amount: {
+      type: Number
+    },
+
+    status: {
+      type: String,
+      default: 'Pending'
+    },
+
+    fullDateIso: {
+      type: String
+    },
+
+    timestamp: {
+      type: String
+    }
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model('Appointment', appointmentSchema, 'appointments');

@@ -1,9 +1,28 @@
 const mongoose = require('mongoose');
 
-const patientSchema = new mongoose.Schema({
-  rating: String,
-  message: String
-}, { timestamps: true });
+const reviewSchema = new mongoose.Schema(
+  {
+    doctorId: {
+      type: String,
+      required: true
+    },
 
-// ⚡ IMPORTANT: third argument = existing collection name
-module.exports = mongoose.model("Review", patientSchema, "reviews");
+    patientId: {
+      type: String,
+      required: true
+    },
+
+    rating: {
+      type: Number,
+      min: 0,
+      max: 5
+    },
+
+    review: {
+      type: String
+    }
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model('Review', reviewSchema, 'reviews');
