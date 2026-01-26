@@ -1,3 +1,4 @@
+const bcrypt = require('bcrypt');
 const mongoose = require('mongoose');
 
 const doctorSchema = new mongoose.Schema(
@@ -80,5 +81,11 @@ const doctorSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+doctorSchema.pre('save', async function (next) {
+  if (!this.isModified('credentials.password')) return next();
+  this.credentials.password = await bcrypt.hash(this.credentials.password, 12);
+  next();
+});
 
 module.exports = mongoose.model('Doctor', doctorSchema, 'doctors');
