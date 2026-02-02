@@ -1,16 +1,16 @@
 require('dotenv').config();
-import express, { json } from 'express';
-import { connect } from 'mongoose';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
-import patientRoutes from './routes/patients';
-import doctorRoutes from './routes/doctors';
-import reviewRoutes from './routes/reviews';
-import appointmentRoutes from './routes/appointments';
+const patientRoutes = require('./routes/patients');
+const doctorRoutes = require('./routes/doctors');
+const reviewRoutes = require('./routes/reviews');
+const appointmentRoutes = require('./routes/appointments');
 
 const app = express();
-import authRoutes from './routes/auth';
+const authRoutes = require('./routes/auth');
 
 app.use(cookieParser());
 app.use(json());
