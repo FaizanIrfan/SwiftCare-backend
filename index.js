@@ -1,19 +1,19 @@
 require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
+import express, { json } from 'express';
+import { connect } from 'mongoose';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
 
-const patientRoutes = require('./routes/patients');
-const doctorRoutes = require('./routes/doctors');
-const reviewRoutes = require('./routes/reviews');
-const appointmentRoutes = require('./routes/appointments');
+import patientRoutes from './routes/patients';
+import doctorRoutes from './routes/doctors';
+import reviewRoutes from './routes/reviews';
+import appointmentRoutes from './routes/appointments';
 
 const app = express();
-const authRoutes = require('./routes/auth');
+import authRoutes from './routes/auth';
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(json());
 app.set('view engine', 'ejs');
 app.use(cors({
   origin: true,
@@ -22,8 +22,11 @@ app.use(cors({
 app.use('/auth', authRoutes);
 
 
-// MongoDB
-mongoose.connect(process.env.MONGO_URI, {
+/* --------------------------------------------------
+   MongoDB
+-------------------------------------------------- */
+
+connect(process.env.MONGO_URI, {
   dbName: "SwiftCare"
 })
 .then(() => console.log("MongoDB Connected to SwiftCare DB"))
@@ -32,18 +35,30 @@ mongoose.connect(process.env.MONGO_URI, {
   process.exit(1);
 });
 
-// Routes
+
+/* --------------------------------------------------
+   Routes
+-------------------------------------------------- */
+
 app.use('/patients', patientRoutes);
 app.use('/doctors', doctorRoutes);
 app.use('/reviews', reviewRoutes);
 app.use('/appointments', appointmentRoutes);
 
-// Health check
+
+/* --------------------------------------------------
+   Health check
+-------------------------------------------------- */
+
 app.get('/', (req, res) => {
-    res.render('main'); // Make sure index.ejs is in your 'views' folder
+    res.render('main');
 });
 
-// Server
+
+/* --------------------------------------------------
+   Server
+-------------------------------------------------- */
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log(`Server running on port ${PORT}`)
