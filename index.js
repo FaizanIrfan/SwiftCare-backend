@@ -26,7 +26,7 @@ app.use('/auth', authRoutes);
    MongoDB
 -------------------------------------------------- */
 
-connect(process.env.MONGO_URI, {
+mongoose.connect(process.env.MONGO_URI, {
   dbName: "SwiftCare"
 })
 .then(() => console.log("MongoDB Connected to SwiftCare DB"))
