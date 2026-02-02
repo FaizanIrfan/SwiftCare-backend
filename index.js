@@ -8,9 +8,10 @@ const patientRoutes = require('./routes/patients');
 const doctorRoutes = require('./routes/doctors');
 const reviewRoutes = require('./routes/reviews');
 const appointmentRoutes = require('./routes/appointments');
+const chatbotRoutes = require('./routes/chatbot');
+const authRoutes = require('./routes/auth');
 
 const app = express();
-const authRoutes = require('./routes/auth');
 
 app.use(cookieParser());
 app.use(express.json());
@@ -20,6 +21,7 @@ app.use(cors({
   credentials: true
 }));
 app.use('/auth', authRoutes);
+app.use("/chatbot", chatbotRoutes);
 
 
 /* --------------------------------------------------
