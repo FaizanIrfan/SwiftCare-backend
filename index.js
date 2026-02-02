@@ -14,13 +14,9 @@ const authRoutes = require('./routes/auth');
 
 app.use(cookieParser());
 app.use(express.json());
+app.set('view engine', 'ejs');
 app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "https://your-nextjs-site.vercel.app"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE"],
+  origin: true,
   credentials: true
 }));
 app.use('/auth', authRoutes);
@@ -44,7 +40,7 @@ app.use('/appointments', appointmentRoutes);
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('SwiftCare API running 🚑');
+    res.render('main'); // Make sure index.ejs is in your 'views' folder
 });
 
 // Server

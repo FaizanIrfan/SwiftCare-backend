@@ -5,11 +5,28 @@ const Patient = require('../models/patient');
 const googleClient = require('../auth/google.client');
 const {
   signAccessToken,
-  signRefreshToken
+  signRefreshToken,
+  verifyRefreshToken
 } = require('../auth/token.service');
-const { verifyRefreshToken } = require('../auth/token.service');
 
 const router = express.Router();
+
+/* --------------------------------------------------
+   Helpers
+-------------------------------------------------- */
+
+const isProd = process.env.NODE_ENV === 'production';
+
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: isProd ? 'none' : 'lax',
+  maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+};
+
+/* --------------------------------------------------
+   LOGIN (Email + Password)
+-------------------------------------------------- */
 
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
@@ -32,23 +49,18 @@ router.post('/login', async (req, res) => {
   if (!match)
     return res.status(401).json({ error: 'Invalid credentials' });
 
-  const payload = {
+  const jwtPayload = {
     sub: user._id.toString(),
     role
   };
 
-  const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
+  const accessToken = signAccessToken(jwtPayload);
+  const refreshToken = signRefreshToken(jwtPayload);
 
-  // Web: HttpOnly cookie
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' ? true : false,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000
-  });
+  // Web: refresh token via HttpOnly cookie
+  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
-
+  // Flutter: access token via JSON
   res.json({
     accessToken,
     role,
@@ -56,13 +68,16 @@ router.post('/login', async (req, res) => {
   });
 });
 
+/* --------------------------------------------------
+   GOOGLE SIGN-IN
+-------------------------------------------------- */
+
 router.post('/google', async (req, res) => {
   try {
     const { idToken, roleHint } = req.body;
 
-    if (!idToken) {
+    if (!idToken)
       return res.status(400).json({ error: 'idToken required' });
-    }
 
     const ticket = await googleClient.verifyIdToken({
       idToken,
@@ -72,13 +87,11 @@ router.post('/google', async (req, res) => {
     const payload = ticket.getPayload();
     const { sub, email, name, picture } = payload;
 
-    // 1️⃣ Try finding user in both Doctor and Patient
     let user = await Patient.findOne({ 'credentials.email': email });
-    let role = 'patient'; // default
+    let role = 'patient';
 
     if (!user) {
-      // NEW USER → only patient sign-up allowed
-      if (!roleHint || roleHint !== 'patient') {
+      if (roleHint !== 'patient') {
         return res.status(400).json({
           error: 'New users can only be patients via Google Sign-In'
         });
@@ -96,8 +109,6 @@ router.post('/google', async (req, res) => {
       });
     }
 
-
-    // 3️⃣ Issue tokens (SAME AS NORMAL LOGIN)
     const jwtPayload = {
       sub: user._id.toString(),
       role
@@ -106,12 +117,7 @@ router.post('/google', async (req, res) => {
     const accessToken = signAccessToken(jwtPayload);
     const refreshToken = signRefreshToken(jwtPayload);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      maxAge: 30 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
     res.json({
       accessToken,
@@ -125,14 +131,26 @@ router.post('/google', async (req, res) => {
   }
 });
 
+/* --------------------------------------------------
+   REFRESH ACCESS TOKEN (Web + Flutter)
+-------------------------------------------------- */
+
 router.post('/refresh', (req, res) => {
-  const token = req.cookies.refreshToken || req.body.refreshToken;
+  const authHeader = req.headers.authorization;
+
+  const token =
+    req.cookies.refreshToken ||
+    (authHeader?.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : null) ||
+    req.body.refreshToken;
 
   if (!token)
     return res.status(401).json({ error: 'No refresh token' });
 
   try {
     const decoded = verifyRefreshToken(token);
+
     const accessToken = signAccessToken({
       sub: decoded.sub,
       role: decoded.role
@@ -144,12 +162,12 @@ router.post('/refresh', (req, res) => {
   }
 });
 
+/* --------------------------------------------------
+   LOGOUT
+-------------------------------------------------- */
+
 router.post('/logout', (req, res) => {
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none'
-  });
+  res.clearCookie('refreshToken', refreshCookieOptions);
   res.json({ success: true });
 });
 
