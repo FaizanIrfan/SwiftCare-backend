@@ -13,7 +13,7 @@ const app = express();
 const authRoutes = require('./routes/auth');
 
 app.use(cookieParser());
-app.use(json());
+app.use(express.json());
 app.set('view engine', 'ejs');
 app.use(cors({
   origin: true,
