@@ -80,8 +80,9 @@ router.post('/google', async (req, res) => {
 
     const ticket = await googleClient.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_ANDROID_CLIENT_ID
+      audience: process.env.GOOGLE_BACKEND_CLIENT_ID
     });
+
 
     const payload = ticket.getPayload();
     const { sub, email, name, picture } = payload;

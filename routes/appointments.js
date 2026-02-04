@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Appointment = require('../models/appointment');
 
-// Create Appointment
+/* --------------------------------------------------
+   Create apppointment
+-------------------------------------------------- */
 router.post('/', async (req, res) => {
   try {
     const a = new Appointment(req.body);
@@ -13,7 +15,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Read all Appointments
+/* --------------------------------------------------
+   Read apppointments
+-------------------------------------------------- */
+
 router.get('/', async (req, res) => {
   const list = await Appointment.find().sort({ createdAt: -1 }).lean();
   res.json(list);

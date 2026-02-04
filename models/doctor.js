@@ -19,7 +19,8 @@ const doctorSchema = new mongoose.Schema(
     },
 
     location: {
-      type: String
+      type: { type: String, default: "Point" },
+      coordinates: [Number] // [longitude, latitude]
     },
 
     contactNo: {
@@ -87,5 +88,7 @@ doctorSchema.pre('save', async function (next) {
   this.credentials.password = await bcrypt.hash(this.credentials.password, 12);
   next();
 });
+
+DoctorSchema.index({ location: "2dsphere" }); // Enable geospatial queries
 
 module.exports = mongoose.model('Doctor', doctorSchema, 'doctors');
