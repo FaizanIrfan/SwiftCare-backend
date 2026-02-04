@@ -89,6 +89,6 @@ doctorSchema.pre('save', async function (next) {
   next();
 });
 
-DoctorSchema.index({ location: "2dsphere" }); // Enable geospatial queries
+doctorSchema.index({ location: "2dsphere" }); // Enable geospatial queries
 
 module.exports = mongoose.model('Doctor', doctorSchema, 'doctors');
