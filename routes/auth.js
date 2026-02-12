@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const Doctor = require('../models/doctor');
 const Patient = require('../models/patient');
-const googleClient = require('../auth/google.client');
+const { androidClient, webClient } = require('../auth/google.client');
 const {
   signAccessToken,
   signRefreshToken,
@@ -73,16 +73,22 @@ router.post('/login', async (req, res) => {
 
 router.post('/google', async (req, res) => {
   try {
-    const { idToken, roleHint } = req.body;
+    const { idToken, roleHint, platform } = req.body;
 
-    if (!idToken)
-      return res.status(400).json({ error: 'idToken required' });
+    print(idToken);
+    print(roleHint);
+    print(platform);
 
-    const ticket = await googleClient.verifyIdToken({
+    if (!idToken) return res.status(400).json({ error: 'idToken required' });
+
+    const client = platform === 'web' ? webClient : androidClient;
+
+    const ticket = await client.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_BACKEND_CLIENT_ID
+      audience: platform === 'web'
+        ? process.env.GOOGLE_BACKEND_CLIENT_ID
+        : process.env.GOOGLE_ANDROID_CLIENT_ID
     });
-
 
     const payload = ticket.getPayload();
     const { sub, email, name, picture } = payload;
