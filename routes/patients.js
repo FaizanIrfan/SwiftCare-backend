@@ -2,17 +2,6 @@ const express = require('express');
 const router = express.Router();
 const Patient = require('../models/patient');
 
-// Create Patient
-router.post('/', async (req, res) => {
-  try {
-    const p = new Patient(req.body);
-    const saved = await p.save();
-    res.status(201).json(saved);
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
 // Read all Patients
 router.get('/', async (req, res) => {
   const list = await Patient.find().sort({ createdAt: -1 }).lean();

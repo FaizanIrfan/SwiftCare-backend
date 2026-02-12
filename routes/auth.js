@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const Doctor = require('../models/doctor');
 const Patient = require('../models/patient');
-const { androidClient, webClient } = require('../auth/google.client');
+const { webClient } = require('../auth/google.client');
 const {
   signAccessToken,
   signRefreshToken,
@@ -24,7 +24,7 @@ const refreshCookieOptions = {
 };
 
 /* --------------------------------------------------
-   LOGIN (Email + Password)
+   SIMPLE SIGN IN
 -------------------------------------------------- */
 
 router.post('/login', async (req, res) => {
@@ -68,56 +68,112 @@ router.post('/login', async (req, res) => {
 });
 
 /* --------------------------------------------------
+   SIMPLE SIGN-UP
+-------------------------------------------------- */
+
+router.post('/signup', async (req, res) => {
+  try {
+    const { name, email, password, roleHint } = req.body;
+
+    // 1️⃣ Basic validation
+    if (!name || !email || !password || !roleHint)
+      return res.status(400).json({ error: 'All fields required' });
+
+    // 2️⃣ Only patient allowed
+    if (roleHint !== 'patient')
+      return res.status(400).json({ error: 'Only patient signup allowed' });
+
+    // 3️⃣ Check if email already exists
+    const existingPatient = await Patient.findOne({
+      'credentials.email': email
+    });
+
+    if (existingPatient)
+      return res.status(409).json({ error: 'Email already registered' });
+
+    // 4️⃣ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 5️⃣ Create patient
+    const user = await Patient.create({
+      name,
+      credentials: {
+        email,
+        password: hashedPassword,
+        provider: 'local'
+      }
+    });
+
+    // 6️⃣ Create tokens
+    const jwtPayload = {
+      sub: user._id.toString(),
+      role: 'patient'
+    };
+
+    const accessToken = signAccessToken(jwtPayload);
+    const refreshToken = signRefreshToken(jwtPayload);
+
+    // 7️⃣ Store refresh token in cookie
+    res.cookie('refreshToken', refreshCookieOptions);
+
+    // 8️⃣ Send response
+    res.status(201).json({
+      accessToken,
+      role: 'patient',
+      userId: user._id
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Signup failed' });
+  }
+});
+
+
+/* --------------------------------------------------
    GOOGLE SIGN-IN
 -------------------------------------------------- */
 
 router.post('/google', async (req, res) => {
   try {
-    const { idToken, roleHint, platform } = req.body;
-
-    print(idToken);
-    print(roleHint);
-    print(platform);
+    const { idToken, roleHint } = req.body;
 
     if (!idToken) return res.status(400).json({ error: 'idToken required' });
 
-    const client = platform === 'web' ? webClient : androidClient;
-
-    const ticket = await client.verifyIdToken({
+    const ticket = await webClient.verifyIdToken({
       idToken,
-      audience: platform === 'web'
-        ? process.env.GOOGLE_BACKEND_CLIENT_ID
-        : process.env.GOOGLE_ANDROID_CLIENT_ID
+      audience: process.env.GOOGLE_BACKEND_CLIENT_ID
     });
 
-    const payload = ticket.getPayload();
-    const { sub, email, name, picture } = payload;
+    let user;
+    if (roleHint == "patient") {
+      const payload = ticket.getPayload();
+      const { name, email, sub, picture } = payload; // here sub means password
 
-    let user = await Patient.findOne({ 'credentials.email': email });
-    let role = 'patient';
+      user = await Patient.findOne({ 'credentials.email': email });
 
-    if (!user) {
-      if (roleHint !== 'patient') {
-        return res.status(400).json({
-          error: 'New users can only be patients via Google Sign-In'
+      const hashedPassword = await bcrypt.hash(sub, 10);
+
+      if (!user) {
+        user = await Patient.create({
+          name,
+          avatar: picture,
+          location: null,
+          phone: null,
+          age: null,
+          gender: null,
+          credentials: {
+            email,
+            password: hashedPassword,
+            provider: 'google',
+          }
         });
       }
-
-      user = await Patient.create({
-        name,
-        avatar: picture,
-        credentials: {
-          email,
-          password: null,
-          provider: 'google',
-          googleId: sub
-        }
-      });
     }
 
     const jwtPayload = {
       sub: user._id.toString(),
-      role
+      roleHint
     };
 
     const accessToken = signAccessToken(jwtPayload);
@@ -127,9 +183,11 @@ router.post('/google', async (req, res) => {
 
     res.json({
       accessToken,
-      role,
+      roleHint,
       userId: user._id
     });
+
+    console.log("Success");
 
   } catch (err) {
     console.error(err);

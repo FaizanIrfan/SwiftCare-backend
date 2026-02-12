@@ -24,6 +24,10 @@ const patientSchema = new mongoose.Schema(
       type: String
     },
 
+    avatar: {
+      type: String
+    },
+
     credentials: {
       email: {
         type: String,
@@ -31,6 +35,10 @@ const patientSchema = new mongoose.Schema(
         lowercase: true
       },
       password: {
+        type: String,
+        required: true
+      },
+      provider: {
         type: String,
         required: true
       }

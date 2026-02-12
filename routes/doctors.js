@@ -3,20 +3,6 @@ const router = express.Router();
 const Doctor = require('../models/doctor');
 
 /* --------------------------------------------------
-   Create doctor
--------------------------------------------------- */
-
-router.post('/', async (req, res) => {
-  try {
-    const d = new Doctor(req.body);
-    const saved = await d.save();
-    res.status(201).json(saved);
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-/* --------------------------------------------------
    Read all doctors
 -------------------------------------------------- */
 
