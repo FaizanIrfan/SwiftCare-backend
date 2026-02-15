@@ -9,7 +9,8 @@ const patientSchema = new mongoose.Schema(
     },
 
     location: {
-      type: String
+      type: { type: String, default: "Point" },
+      coordinates: [Number] // [longitude, latitude]
     },
 
     phone: {

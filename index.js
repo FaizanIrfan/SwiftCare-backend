@@ -10,6 +10,7 @@ const reviewRoutes = require('./routes/reviews');
 const appointmentRoutes = require('./routes/appointments');
 const chatbotRoutes = require('./routes/chatbot');
 const authRoutes = require('./routes/auth');
+const paymentRoutes = require('./routes/payment');
 
 const app = express();
 
@@ -20,8 +21,6 @@ app.use(cors({
   origin: true,
   credentials: true
 }));
-app.use('/auth', authRoutes);
-app.use("/chatbot", chatbotRoutes);
 
 
 /* --------------------------------------------------
@@ -42,9 +41,12 @@ mongoose.connect(process.env.MONGO_URI, {
    Routes
 -------------------------------------------------- */
 
-app.use('/patients', patientRoutes);
+app.use('/auth', authRoutes);
 app.use('/doctors', doctorRoutes);
 app.use('/reviews', reviewRoutes);
+app.use("/chatbot", chatbotRoutes);
+app.use("/payment", paymentRoutes);
+app.use('/patients', patientRoutes);
 app.use('/appointments', appointmentRoutes);
 
 

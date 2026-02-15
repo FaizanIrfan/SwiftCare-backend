@@ -92,11 +92,16 @@ router.post('/signup', async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
 
     // 4️⃣ Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     // 5️⃣ Create patient
     const user = await Patient.create({
       name,
+      age: null,
+      avatar: null,
+      location: null,
+      phone: null,
+      gender: null,
       credentials: {
         email,
         password: hashedPassword,
@@ -111,7 +116,6 @@ router.post('/signup', async (req, res) => {
     };
 
     const accessToken = signAccessToken(jwtPayload);
-    const refreshToken = signRefreshToken(jwtPayload);
 
     // 7️⃣ Store refresh token in cookie
     res.cookie('refreshToken', refreshCookieOptions);
