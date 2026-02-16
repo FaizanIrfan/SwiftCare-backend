@@ -61,6 +61,7 @@ router.post('/login', async (req, res) => {
 
   // Flutter: access token via JSON
   res.json({
+    refreshToken,
     accessToken,
     role,
     userId: user._id
@@ -122,6 +123,7 @@ router.post('/signup', async (req, res) => {
 
     // 8️⃣ Send response
     res.status(201).json({
+      refreshToken,
       accessToken,
       role: 'patient',
       userId: user._id
@@ -186,6 +188,7 @@ router.post('/google', async (req, res) => {
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
     res.json({
+      refreshToken,
       accessToken,
       roleHint,
       userId: user._id
