@@ -3,8 +3,7 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 exports.createPaymentIntent = async (amount) => {
   return await stripe.paymentIntents.create({
-    amount: amount,
-    currency: "pkr",
+    amount: amount * 100,
     payment_method_types: ["card"],
   });
 };
