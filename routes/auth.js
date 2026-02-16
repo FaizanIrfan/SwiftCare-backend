@@ -42,7 +42,7 @@ router.post('/login', async (req, res) => {
   }
 
   if (!user)
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'User not found' });
 
   const match = await bcrypt.compare(password, user.credentials.password);
   if (!match)
@@ -117,9 +117,10 @@ router.post('/signup', async (req, res) => {
     };
 
     const accessToken = signAccessToken(jwtPayload);
+    const refreshToken = signRefreshToken(jwtPayload);
 
-    // 7️⃣ Store refresh token in cookie
-    res.cookie('refreshToken', refreshCookieOptions);
+    // Web: refresh token via HttpOnly cookie
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
     // 8️⃣ Send response
     res.status(201).json({
