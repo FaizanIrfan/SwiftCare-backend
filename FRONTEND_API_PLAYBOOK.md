@@ -89,11 +89,13 @@ Body:
 ## 3) Authorization Summary
 - Public routes:
 - `/auth/*`
-- `POST /reviews`
+- `GET /doctors`
+- `GET /doctors/:id`
 - `GET /reviews`
 - `POST /payment/create-intent`
 - `POST /chatbot/chat`
-- Auth required on all routes under `/api/user`, `/doctors`, `/patients`, `/appointments`, `/shifts`, `/queue`, `/notifications`, `/doctors/verification`
+- Auth required on all routes under `/api/user`, `/patients`, `/appointments`, `/shifts`, `/queue`, `/notifications`, `/doctors/verification`
+- Auth required for `GET /doctors/nearby` and `PUT /doctors/:id`
 - Ownership and role constraints:
 - Doctor update: self or admin
 - Patient read/update/location: self or admin
@@ -107,6 +109,7 @@ Body:
 - Shift create/read/manage: same doctor or admin
 - Queue `start-shift`, `next`, `end-shift`: doctor role
 - Queue `patients`: auth only
+- Review create: auth required (no owner-match enforcement on `patientId` in current code)
 - Review delete: review owner patient or admin
 - Review respond: admin
 - Payment confirm: appointment patient/doctor/admin
@@ -118,10 +121,10 @@ Body:
 - `POST /upload-image`
 
 ### Doctors (`/doctors`)
-- `GET /`
-- `GET /nearby?lat=&lng=`
-- `GET /:id`
-- `PUT /:id`
+- `GET /` (public)
+- `GET /nearby?lat=&lng=` (auth)
+- `GET /:id` (public)
+- `PUT /:id` (auth; doctor self/admin)
 
 ### Verification (`/doctors/verification`)
 - `GET /`
@@ -159,7 +162,7 @@ Body:
 - `POST /patients`
 
 ### Reviews (`/reviews`)
-- `POST /`
+- `POST /` (auth)
 - `GET /`
 - `DELETE /:id`
 - `PATCH /:id/respond`
@@ -425,4 +428,4 @@ Server events and payloads:
 - Build per-endpoint parsers because response wrappers vary
 - Subscribe to queue and notification socket events after successful auth
 
-Last synced: 2026-04-05
+Last synced: 2026-04-06

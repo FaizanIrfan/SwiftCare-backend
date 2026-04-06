@@ -46,20 +46,23 @@ Refresh endpoint (`POST /auth/refresh`) token sources:
 ## 4) Access Control Matrix
 Public routes:
 - `/auth/*`
-- `POST /reviews`
+- `GET /doctors`
+- `GET /doctors/:id`
 - `GET /reviews`
 - `POST /payment/create-intent`
 - `POST /chatbot/chat`
 
 Auth-protected route groups:
 - `/api/user/*`
-- `/doctors/*`
+- `/doctors/nearby`
+- `PUT /doctors/:id`
 - `/patients/*`
 - `/appointments/*`
 - `/shifts/*`
 - `/queue/*`
 - `/notifications/*`
 - `/doctors/verification/*`
+- `POST /reviews`
 - `DELETE /reviews/:id`
 - `PATCH /reviews/:id/respond`
 - `POST /payment/confirm`
@@ -77,6 +80,7 @@ Ownership and role checks:
 - Shift create, active lookup, upcoming lookup, start, end: same doctor or admin
 - Queue start, next, end: `doctor` role only
 - Queue patients list: auth only
+- Review create: auth required (no owner-match enforcement on `patientId` in current code)
 - Review delete: review owner patient or admin
 - Review respond: admin only
 - Payment confirm: appointment patient or doctor owner, or admin
@@ -230,4 +234,4 @@ Server events:
 - `/queue/patients` is auth-protected but not doctor-role-protected
 - `POST /notifications/test` is admin-only only when `NODE_ENV=production`
 
-Last synced: 2026-04-05
+Last synced: 2026-04-06
