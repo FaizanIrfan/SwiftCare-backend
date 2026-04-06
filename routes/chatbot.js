@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 const { askGemini } = require("../services/gemini.service");
 const Doctor = require("../models/doctor");
+const { requireAuth } = require('../auth/auth.middleware');
+
+router.use(requireAuth);
 
 router.post("/chat", async (req, res) => {
   try {
@@ -19,8 +22,8 @@ router.post("/chat", async (req, res) => {
       return `
 Doctor Name: ${d.name}
 Specialty: ${d.specialization}
-Timings: ${d.availableHours || "Not available"}
-Available days: ${(d.availableDays || []).join(", ")}
+Available days: ${(d.schedule?.availableDays || []).join(", ")}
+Timings: ${(d.schedule?.availableHours || []).join(", ") || "Not available"}
 `;
     }).join("\n");
 
