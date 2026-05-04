@@ -7,10 +7,20 @@ const Notification = require('../models/notification');
 const { requireAuth, requireRole } = require('../auth/auth.middleware');
 const { getIo } = require('../socket/io');
 const { createNotification } = require('../services/notification.service');
+const {
+    SLOT_MINUTES,
+    buildSlotIndexMap,
+    attachQueueNumbers
+} = require('../services/queueSlots');
 const CANCELLED_STATUS = 'cancelled';
 const TURN_APPROACH_THRESHOLD = 2;
 
 router.use(requireAuth);
+
+function orderQueueAppointments(appointments, slotIndexByTime) {
+    return attachQueueNumbers(appointments, slotIndexByTime)
+        .sort((a, b) => a.queueNumber - b.queueNumber);
+}
 
 async function queueNotificationExists({ userId, shiftId, type, currentServing, nextQueueNumber, appointmentId }) {
     const query = { userId: String(userId), type };
@@ -22,20 +32,24 @@ async function queueNotificationExists({ userId, shiftId, type, currentServing, 
     return Boolean(found);
 }
 
-async function notifyQueueProgress(shiftId, currentServing) {
+async function notifyQueueProgress(shift, slotIndexByTime, currentServing) {
+    const shiftId = String(shift?._id || shift || '');
+    if (!shiftId) return;
+
     const activeQueue = await Appointment.find({
         shiftId,
-        queueNumber: { $gt: currentServing },
         status: { $ne: CANCELLED_STATUS }
     })
-        .sort({ queueNumber: 1 })
         .select({ _id: 1, patientId: 1, doctorId: 1, queueNumber: 1, date: 1, time: 1 })
         .lean();
 
-    if (activeQueue.length === 0) return;
+    const orderedQueue = orderQueueAppointments(activeQueue, slotIndexByTime)
+        .filter((apt) => apt.queueNumber > currentServing);
 
-    const nextUp = activeQueue[0];
-    const nearTurns = activeQueue.filter((apt) => apt.queueNumber <= currentServing + TURN_APPROACH_THRESHOLD + 1);
+    if (orderedQueue.length === 0) return;
+
+    const nextUp = orderedQueue[0];
+    const nearTurns = orderedQueue.filter((apt) => apt.queueNumber <= currentServing + TURN_APPROACH_THRESHOLD + 1);
 
     const jobs = nearTurns.map((apt) => {
         const turnsAway = apt.queueNumber - currentServing;
@@ -124,13 +138,13 @@ router.post('/start-shift', requireRole('doctor'), async (req, res) => {
             { new: true, upsert: true }
         );
 
-        const nextAppointment = await Appointment.findOne({
+        const { slotIndexByTime } = buildSlotIndexMap(shift.startTime, shift.endTime, SLOT_MINUTES);
+        const appointments = await Appointment.find({
             shiftId,
-            queueNumber: { $gt: queue.currentServing },
             status: { $ne: CANCELLED_STATUS }
-        })
-            .sort({ queueNumber: 1 })
-            .lean();
+        }).lean();
+        const orderedAppointments = orderQueueAppointments(appointments, slotIndexByTime);
+        const nextAppointment = orderedAppointments.find((apt) => apt.queueNumber > queue.currentServing) || null;
 
         return res.json({
             message: "Shift started",
@@ -170,19 +184,19 @@ router.post('/next', requireRole('doctor'), async (req, res) => {
             { new: true, upsert: true }
         );
 
+        const { slotIndexByTime } = buildSlotIndexMap(shift.startTime, shift.endTime, SLOT_MINUTES);
         const maxRetries = 5;
         let currentServing = queue.currentServing;
         let nextAppointment = null;
         let updatedQueue = null;
 
         for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-            nextAppointment = await Appointment.findOne({
+            const appointments = await Appointment.find({
                 shiftId,
-                queueNumber: { $gt: currentServing },
                 status: { $ne: CANCELLED_STATUS }
-            })
-                .sort({ queueNumber: 1 })
-                .lean();
+            }).lean();
+            const orderedAppointments = orderQueueAppointments(appointments, slotIndexByTime);
+            nextAppointment = orderedAppointments.find((apt) => apt.queueNumber > currentServing) || null;
 
             if (!nextAppointment) {
                 return res.status(409).json({
@@ -217,7 +231,7 @@ router.post('/next', requireRole('doctor'), async (req, res) => {
             console.error('Failed to emit queueUpdated event:', socketError.message);
         }
 
-        await notifyQueueProgress(shiftId, updatedQueue.currentServing);
+        await notifyQueueProgress(shift, slotIndexByTime, updatedQueue.currentServing);
 
         return res.json({
             message: "Queue updated",
@@ -282,14 +296,14 @@ router.post('/patients', async (req, res) => {
         const queue = await QueueState.findOne({ shiftId }).lean();
         const currentServing = queue ? queue.currentServing : 0;
 
+        const { slotIndexByTime } = buildSlotIndexMap(shift.startTime, shift.endTime, SLOT_MINUTES);
         const list = await Appointment.find({
             shiftId,
             status: { $ne: CANCELLED_STATUS }
-        })
-            .sort({ queueNumber: 1 })
-            .lean();
+        }).lean();
 
-        const patients = list.map((apt) => ({
+        const orderedPatients = orderQueueAppointments(list, slotIndexByTime);
+        const patients = orderedPatients.map((apt) => ({
             ...apt,
             isServed: apt.queueNumber <= currentServing
         }));

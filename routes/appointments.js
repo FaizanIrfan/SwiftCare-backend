@@ -8,56 +8,18 @@ const { requireAuth } = require('../auth/auth.middleware');
 const { getIo } = require('../socket/io');
 const { createNotification } = require('../services/notification.service');
 const { getAdminUserIds } = require('../services/notification.targets');
+const {
+  SLOT_MINUTES,
+  normalizeTimeLabel,
+  buildSlots,
+  buildSlotIndexMap,
+  getQueueNumberForTime,
+  attachQueueNumbers
+} = require('../services/queueSlots');
 
-const SLOT_MINUTES = 10;
 const CANCELLED_STATUS = 'cancelled';
 const ACTIVE_STATUSES = ['pending', 'in_progress', 'completed'];
 const ALLOWED_STATUSES = [...ACTIVE_STATUSES, CANCELLED_STATUS];
-
-function parse12HourTimeToMinutes(timeStr) {
-  if (!timeStr || typeof timeStr !== 'string') return null;
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return null;
-
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const meridiem = match[3].toUpperCase();
-
-  if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return null;
-
-  if (hours === 12) hours = 0;
-  if (meridiem === 'PM') hours += 12;
-
-  return (hours * 60) + minutes;
-}
-
-function minutesTo12HourTime(totalMinutes) {
-  const hours24 = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  const meridiem = hours24 >= 12 ? 'PM' : 'AM';
-  const hours12 = (hours24 % 12) || 12;
-
-  return `${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')} ${meridiem}`;
-}
-
-function buildSlots(startTime, endTime, slotMinutes = SLOT_MINUTES) {
-  const start = parse12HourTimeToMinutes(startTime);
-  const end = parse12HourTimeToMinutes(endTime);
-
-  if (start === null || end === null || end <= start) {
-    return [];
-  }
-
-  const slots = [];
-  for (let t = start; t + slotMinutes <= end; t += slotMinutes) {
-    slots.push(minutesTo12HourTime(t));
-  }
-  return slots;
-}
-
-function normalizeTimeLabel(time) {
-  return String(time || '').trim().toUpperCase();
-}
 
 function normalizeIsoDate(value) {
   const parsed = new Date(value);
@@ -73,20 +35,34 @@ function parsePagination(value, fallback, { min = 1, max = 100 } = {}) {
 }
 
 async function buildShiftQueueSnapshot(shiftId) {
-  const queue = await QueueState.findOne({ shiftId }).lean();
+  const [queue, shift, patients] = await Promise.all([
+    QueueState.findOne({ shiftId }).lean(),
+    Shift.findById(shiftId).lean(),
+    Appointment.find({
+      shiftId,
+      status: { $ne: CANCELLED_STATUS }
+    }).lean()
+  ]);
+
   const currentServing = queue ? queue.currentServing : 0;
-  const patients = await Appointment.find({
-    shiftId,
-    status: { $ne: CANCELLED_STATUS }
-  })
-    .sort({ queueNumber: 1 })
-    .lean();
+  if (!shift) {
+    return {
+      shiftId: String(shiftId),
+      currentServing,
+      totalPatients: patients.length,
+      patients
+    };
+  }
+
+  const { slotIndexByTime } = buildSlotIndexMap(shift.startTime, shift.endTime, SLOT_MINUTES);
+  const orderedPatients = attachQueueNumbers(patients, slotIndexByTime)
+    .sort((a, b) => a.queueNumber - b.queueNumber);
 
   return {
     shiftId: String(shiftId),
     currentServing,
-    totalPatients: patients.length,
-    patients
+    totalPatients: orderedPatients.length,
+    patients: orderedPatients
   };
 }
 
@@ -291,7 +267,6 @@ router.get('/available-slots', async (req, res) => {
    3. Create appointment
 -------------------------------------------------- */
 router.post('/', async (req, res) => {
-  let rollbackExpectedQueueNumber = null;
   try {
     const appointmentData = req.body;
     const actorUserId = String(req.user?.sub || '').trim();
@@ -356,7 +331,11 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const shiftSlots = buildSlots(shift.startTime, shift.endTime, SLOT_MINUTES);
+    const { slots: shiftSlots, slotIndexByTime } = buildSlotIndexMap(
+      shift.startTime,
+      shift.endTime,
+      SLOT_MINUTES
+    );
     const normalizedRequestedTime = normalizeTimeLabel(appointmentData.time);
     const allowedSet = new Set(shiftSlots.map(normalizeTimeLabel));
 
@@ -366,17 +345,19 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const queue = await QueueState.findOneAndUpdate(
-      { shiftId: appointmentData.shiftId },
-      {
-        $inc: { lastQueueNumber: 1 },
-        $setOnInsert: { currentServing: 0 }
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: false }
-    );
+    const queueNumber = getQueueNumberForTime(appointmentData.time, slotIndexByTime);
+    if (!queueNumber) {
+      return res.status(400).json({
+        message: 'Selected time is outside doctor shift or not on 10-minute boundary'
+      });
+    }
 
-    const queueNumber = queue.lastQueueNumber;
-    rollbackExpectedQueueNumber = queueNumber;
+    const queueState = await QueueState.findOne({ shiftId: appointmentData.shiftId }).lean();
+    if (queueState && queueState.currentServing >= queueNumber) {
+      return res.status(409).json({
+        message: 'Selected time has already passed in the queue'
+      });
+    }
     const normalizedIncomingStatus = String(appointmentData.status || 'pending').trim().toLowerCase();
     const finalStatus = ALLOWED_STATUSES.includes(normalizedIncomingStatus)
       ? normalizedIncomingStatus
@@ -402,17 +383,6 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error(error);
     if (error && error.code === 11000) {
-      try {
-        await QueueState.updateOne(
-          {
-            shiftId: req.body?.shiftId,
-            lastQueueNumber: rollbackExpectedQueueNumber
-          },
-          { $inc: { lastQueueNumber: -1 } }
-        );
-      } catch (rollbackError) {
-        console.error('Failed to rollback queue increment after duplicate appointment:', rollbackError);
-      }
       return res.status(409).json({
         message: 'Selected slot is already booked',
         error: error.message

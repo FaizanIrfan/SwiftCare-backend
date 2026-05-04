@@ -65,9 +65,9 @@ MongoDB
 -------------------------------------------------- */
 
 mongoose.connect(process.env.MONGO_URI, {
-  dbName: "PerfectData"
+  dbName: "SwiftCare"
 })
-.then(() => console.log("MongoDB Connected to PerfectData"))
+.then(() => console.log("MongoDB Connected to SwiftCare"))
 .catch(err => {
   console.error("MongoDB connection error:", err);
   process.exit(1);
