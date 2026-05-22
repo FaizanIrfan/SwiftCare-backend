@@ -25,6 +25,10 @@ router.get('/doctor/:doctorId', async (req, res) => {
       return res.status(400).json({ message: 'doctorId is required' });
     }
 
+    if (!canManageDoctorShift(req, doctorId)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
     const shifts = await Shift.find({ doctorId })
       .sort({ date: -1, startTime: 1 })
       .lean();

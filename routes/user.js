@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 const Patient = require('../models/patient');
@@ -8,6 +9,13 @@ const Doctor = require('../models/doctor');
 const { requireAuth } = require('../auth/auth.middleware');
 const { uploadImageBuffer } = require('../services/cloudinary');
 const { sendEmail } = require('../services/email.service');
+
+const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -19,6 +27,38 @@ const upload = multer({
       return cb(null, true);
     }
     return cb(new Error('Only image files are allowed'), false);
+  }
+});
+
+router.post('/contact', contactLimiter, async (req, res) => {
+  try {
+    const { name, contactNumber, email, subject, message } = req.body;
+
+    if (!name || !contactNumber || !email || !subject || !message) {
+      return res.status(400).json({
+        error: 'All fields (name, contactNumber, email, subject, message) are required'
+      });
+    }
+
+    const normalizedEmail = String(email).trim();
+    const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!emailIsValid) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    const emailText = `Name: ${name}\nContact Number: ${contactNumber}\nEmail: ${normalizedEmail}\n\nMessage:\n${message}`;
+    const recipient = [process.env.SMTP_USER];
+
+    await sendEmail({
+      to: recipient,
+      subject: subject,
+      text: emailText
+    });
+
+    return res.status(200).json({ message: 'Email sent successfully' });
+  } catch (error) {
+    console.error('Error sending contact email:', error);
+    return res.status(500).json({ error: 'Failed to send email' });
   }
 });
 
@@ -134,32 +174,6 @@ router.post('/toggle-favorite', async (req, res) => {
     return res.status(500).json({
       message: 'Internal server error'
     });
-  }
-});
-
-router.post('/contact', async (req, res) => {
-  try {
-    const { name, contactNumber, email, subject, message } = req.body;
-    
-    if (!name || !contactNumber || !email || !subject || !message) {
-      return res.status(400).json({
-        error: 'All fields (name, contactNumber, email, subject, message) are required'
-      });
-    }
-    
-    const emailText = `Name: ${name}\nContact Number: ${contactNumber}\nEmail: ${email}\n\nMessage:\n${message}`;
-    const recipient = [process.env.SMTP_USER];
-    
-    await sendEmail({
-      to: recipient,
-      subject: subject,
-      text: emailText
-    });
-
-    return res.status(200).json({ message: 'Email sent successfully' });
-  } catch (error) {
-    console.error('Error sending contact email:', error);
-    return res.status(500).json({ error: 'Failed to send email' });
   }
 });
 

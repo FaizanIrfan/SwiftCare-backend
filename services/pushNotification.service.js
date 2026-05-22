@@ -18,10 +18,6 @@ function loadServiceAccount() {
         const decoded = Buffer.from(raw, 'base64').toString('utf8');
         return JSON.parse(decoded);
       } catch (error) {
-        const guessedPath = path.resolve(raw);
-        if (fs.existsSync(guessedPath)) {
-          return JSON.parse(fs.readFileSync(guessedPath, 'utf8'));
-        }
         throw error;
       }
     }
@@ -47,9 +43,18 @@ function initFirebaseAdmin() {
       return false;
     }
 
+    const projectId = serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID;
+    if (!projectId) {
+      initFailed = true;
+      console.warn(
+        '⚠️ FCM disabled: FIREBASE_PROJECT_ID or serviceAccount.project_id is required.'
+      );
+      return false;
+    }
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      projectId: serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID
+      projectId
     });
 
     initialized = true;

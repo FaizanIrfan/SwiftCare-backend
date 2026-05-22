@@ -88,7 +88,7 @@ async function validateDoctorList(doctorList, res) {
    1. Create Facility
    POST /
    ========================================================================= */
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { name, about, location, doctorList } = req.body;
 
@@ -230,6 +230,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const updatePayload = {};
+    const unsetPayload = {};
 
     if (name !== undefined) {
       if (typeof name !== 'string' || !name.trim()) {
@@ -244,7 +245,7 @@ router.put('/:id', async (req, res) => {
 
     if (location !== undefined) {
       if (location === null) {
-        updatePayload.location = undefined;
+        unsetPayload.location = "";
       } else {
         const locResult = processLocation(location);
         if (locResult.error) {
@@ -266,17 +267,33 @@ router.put('/:id', async (req, res) => {
       }
     }
 
+    const prevDoctorIds = currentFacility.doctorList.map(id => String(id));
+
+    const updateObj = { $set: updatePayload };
+    if (Object.keys(unsetPayload).length > 0) {
+      updateObj.$unset = unsetPayload;
+    }
+
     const updatedFacility = await Facility.findByIdAndUpdate(
       id,
-      { $set: updatePayload },
+      updateObj,
       { new: true }
     ).populate('doctorList');
 
     // Sync location to all doctors in the facility
-    if (updatedFacility && updatedFacility.doctorList && updatedFacility.doctorList.length > 0 && updatedFacility.location) {
-      const docIds = updatedFacility.doctorList.map(doc => doc._id);
+    const newDoctorIds = updatedFacility.doctorList ? updatedFacility.doctorList.map(doc => String(doc._id)) : [];
+    const removedDoctorIds = prevDoctorIds.filter(id => !newDoctorIds.includes(id));
+
+    if (removedDoctorIds.length > 0) {
       await Doctor.updateMany(
-        { _id: { $in: docIds } },
+        { _id: { $in: removedDoctorIds } },
+        { $unset: { 'location.geo': "", 'location.label': "", 'location.clinicName': "" } }
+      );
+    }
+
+    if (newDoctorIds.length > 0 && updatedFacility.location) {
+      await Doctor.updateMany(
+        { _id: { $in: newDoctorIds } },
         {
           $set: {
             'location.geo': updatedFacility.location.geo,
@@ -313,6 +330,13 @@ router.delete('/:id', async (req, res) => {
     const deleted = await Facility.findByIdAndDelete(id);
     if (!deleted) {
       return res.status(404).json({ error: 'Facility not found' });
+    }
+
+    if (deleted.doctorList && deleted.doctorList.length > 0) {
+      await Doctor.updateMany(
+        { _id: { $in: deleted.doctorList } },
+        { $unset: { 'location.geo': "", 'location.label': "", 'location.clinicName': "" } }
+      );
     }
 
     return res.json({

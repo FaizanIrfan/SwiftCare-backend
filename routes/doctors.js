@@ -143,6 +143,13 @@ router.put('/:id', requireAuth, async (req, res) => {
 /* --------------------------------------------------
    Create doctor shifts (for upcoming 30 days)
 -------------------------------------------------- */
+function canManageDoctorShift(req, doctorId) {
+  const actorUserId = String(req.user?.sub || '').trim();
+  const actorRole = req.user?.role;
+  if (actorRole === 'admin') return true;
+  return actorRole === 'doctor' && actorUserId === String(doctorId);
+}
+
 router.post('/generate-shifts', requireAuth, async (req, res) => {
   try {
     const { doctorId, availableDays, availableHours } = req.body;
@@ -151,6 +158,15 @@ router.post('/generate-shifts', requireAuth, async (req, res) => {
       return res.status(400).json({
         message: 'doctorId, availableDays, and availableHours are required'
       });
+    }
+
+    if (!canManageDoctorShift(req, doctorId)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const doctor = await Doctor.findById(doctorId).lean();
+    if (!doctor) {
+      return res.status(404).json({ message: 'Doctor not found' });
     }
 
     await ensureDoctorFutureShifts({
