@@ -140,4 +140,37 @@ router.put('/:id', requireAuth, async (req, res) => {
   }
 });
 
+/* --------------------------------------------------
+   Create doctor shifts (for upcoming 30 days)
+-------------------------------------------------- */
+router.post('/generate-shifts', requireAuth, async (req, res) => {
+  try {
+    const { doctorId, availableDays, availableHours } = req.body;
+
+    if (!doctorId || !availableDays || !availableHours) {
+      return res.status(400).json({
+        message: 'doctorId, availableDays, and availableHours are required'
+      });
+    }
+
+    await ensureDoctorFutureShifts({
+      doctorId: doctorId,
+      availableDays: availableDays,
+      availableHours: availableHours
+    });
+
+    return res.status(201).json({
+      message: 'Shifts for 30 days are created'
+    });
+  } catch (error) {
+    if (error && error.code === 11000) {
+      return res.status(409).json({
+        message: 'Shifts already exist for this slot'
+      });
+    }
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to create shifts' });
+  }
+});
+
 module.exports = router;

@@ -15,6 +15,28 @@ function canManageDoctorShift(req, doctorId) {
 router.use(requireAuth);
 
 /* --------------------------------------------------
+   Get all shifts for a doctor
+-------------------------------------------------- */
+router.get('/doctor/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    if (!doctorId) {
+      return res.status(400).json({ message: 'doctorId is required' });
+    }
+
+    const shifts = await Shift.find({ doctorId })
+      .sort({ date: -1, startTime: 1 })
+      .lean();
+
+    return res.json(shifts);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to fetch shifts' });
+  }
+});
+
+/* --------------------------------------------------
    Create a shift (scheduled)
 -------------------------------------------------- */
 router.post('/', async (req, res) => {

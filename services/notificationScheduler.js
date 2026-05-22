@@ -1,5 +1,6 @@
 const Appointment = require('../models/appointment');
 const Notification = require('../models/notification');
+const Shift = require('../models/shift');
 const { createNotification } = require('./notification.service');
 const mongoose = require('mongoose');
 
@@ -124,29 +125,114 @@ async function acquireSchedulerLock() {
   const now = new Date();
   const leaseUntil = new Date(now.getTime() + LOCK_TTL_MS);
 
-  const result = await locksCollection.findOneAndUpdate(
-    {
-      _id: LOCK_NAME,
-      $or: [
-        { leaseUntil: { $lte: now } },
-        { ownerId: instanceId }
-      ]
-    },
-    {
-      $set: {
-        ownerId: instanceId,
-        leaseUntil,
-        updatedAt: now
+  try {
+    const result = await locksCollection.findOneAndUpdate(
+      {
+        _id: LOCK_NAME,
+        $or: [
+          { leaseUntil: { $lte: now } },
+          { ownerId: instanceId }
+        ]
       },
-      $setOnInsert: { createdAt: now }
-    },
-    {
-      upsert: true,
-      returnDocument: 'after'
-    }
-  );
+      {
+        $set: {
+          ownerId: instanceId,
+          leaseUntil,
+          updatedAt: now
+        },
+        $setOnInsert: { createdAt: now }
+      },
+      {
+        upsert: true,
+        returnDocument: 'after'
+      }
+    );
 
-  return result?.ownerId === instanceId || result?.value?.ownerId === instanceId;
+    return result?.ownerId === instanceId || result?.value?.ownerId === instanceId;
+  } catch (error) {
+    if (error.code === 11000) {
+      return false; // Another instance created the lock first
+    }
+    throw error;
+  }
+}
+
+function parseShiftEndDateTime(shift) {
+  const dateStr = String(shift.date || '').trim();
+  const timeStr = String(shift.endTime || '').trim();
+  if (!dateStr || !timeStr) return null;
+
+  const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!dateMatch || !timeMatch) return null;
+
+  let hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const meridiem = timeMatch[3].toUpperCase();
+
+  if (hour === 12) hour = 0;
+  if (meridiem === 'PM') hour += 12;
+
+  const year = Number(dateMatch[1]);
+  const month = Number(dateMatch[2]) - 1;
+  const day = Number(dateMatch[3]);
+
+  return new Date(year, month, day, hour, minute, 0, 0);
+}
+
+async function runStatusUpdateCycle() {
+  const now = new Date();
+
+  // 1. Shifts: turn 'scheduled' to 'ended' if endTime has passed
+  try {
+    const scheduledShifts = await Shift.find({ status: 'scheduled' }).lean();
+    const shiftsToUpdate = [];
+    
+    for (const shift of scheduledShifts) {
+      const endDateTime = parseShiftEndDateTime(shift);
+      if (endDateTime && now >= endDateTime) {
+        shiftsToUpdate.push(shift._id);
+      }
+    }
+
+    if (shiftsToUpdate.length > 0) {
+      await Shift.updateMany(
+        { _id: { $in: shiftsToUpdate } },
+        { $set: { status: 'ended' } }
+      );
+    }
+  } catch (error) {
+    console.error('Error auto-updating shifts:', error.message);
+  }
+
+  // 2. Appointments: turn 'pending' to 'cancelled' if current date > appointment date
+  try {
+    const pendingAppointments = await Appointment.find({ status: 'pending' }).lean();
+    const appointmentsToUpdate = [];
+    
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const localTodayStr = `${year}-${month}-${day}`;
+
+    for (const appt of pendingAppointments) {
+      if (!appt.date) continue;
+      
+      const apptDateStr = String(appt.date).trim();
+      if (localTodayStr > apptDateStr) {
+        appointmentsToUpdate.push(appt._id);
+      }
+    }
+
+    if (appointmentsToUpdate.length > 0) {
+      await Appointment.updateMany(
+        { _id: { $in: appointmentsToUpdate } },
+        { $set: { status: 'cancelled' } }
+      );
+    }
+  } catch (error) {
+    console.error('Error auto-cancelling appointments:', error.message);
+  }
 }
 
 async function runLeaderCycle() {
@@ -163,6 +249,7 @@ async function runLeaderCycle() {
   if (!isLeader) return;
 
   await runReminderCycle();
+  await runStatusUpdateCycle();
 }
 
 function startNotificationScheduler() {

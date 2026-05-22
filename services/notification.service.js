@@ -1,5 +1,6 @@
 const Notification = require('../models/notification');
 const { getIo } = require('../socket/io');
+const { sendPushNotification } = require('./pushNotification.service');
 
 function getUserRoom(userId) {
   return `user:${String(userId || '').trim()}`;
@@ -33,6 +34,17 @@ async function createNotification({
   if (io) {
     io.to(getUserRoom(normalizedUserId)).emit('notification:new', notification);
   }
+
+  sendPushNotification({
+    userId: normalizedUserId,
+    title,
+    body,
+    data: {
+      notificationId: String(notification._id),
+      type,
+      ...data
+    }
+  });
 
   return notification;
 }

@@ -21,10 +21,7 @@ const reviewSchema = new mongoose.Schema(
     comment: {
       type: String
     },
-    review: {
-      type: String
-    },
-
+    
     adminResponse: {
       type: String,
       default: ''

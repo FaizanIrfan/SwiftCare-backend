@@ -5,26 +5,37 @@ const Patient = require('../models/patient');
 const QueueState = require('../models/queueState');
 const Shift = require('../models/shift');
 const { requireAuth } = require('../auth/auth.middleware');
-const { getIo } = require('../socket/io');
 const { createNotification } = require('../services/notification.service');
 const { getAdminUserIds } = require('../services/notification.targets');
+const {
+  EVENTS,
+  emitShiftBookingUpdated,
+  emitQueueUpdated,
+  emitAppointmentEvent
+} = require('../services/realtimeEvents');
 const {
   SLOT_MINUTES,
   normalizeTimeLabel,
   buildSlots,
   buildSlotIndexMap,
-  getQueueNumberForTime,
-  attachQueueNumbers
+  getQueueNumberForTime
 } = require('../services/queueSlots');
 
 const CANCELLED_STATUS = 'cancelled';
-const ACTIVE_STATUSES = ['pending', 'in_progress', 'completed'];
+const IN_PROGRESS_STATUS = 'in-progress';
+const ACTIVE_STATUSES = ['pending', 'in-progress', 'completed'];
 const ALLOWED_STATUSES = [...ACTIVE_STATUSES, CANCELLED_STATUS];
 
 function normalizeIsoDate(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
+}
+
+function normalizeDateOnly(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
 }
 
 function parsePagination(value, fallback, { min = 1, max = 100 } = {}) {
@@ -34,46 +45,25 @@ function parsePagination(value, fallback, { min = 1, max = 100 } = {}) {
   return Math.min(parsed, max);
 }
 
-async function buildShiftQueueSnapshot(shiftId) {
-  const [queue, shift, patients] = await Promise.all([
-    QueueState.findOne({ shiftId }).lean(),
-    Shift.findById(shiftId).lean(),
-    Appointment.find({
-      shiftId,
-      status: { $ne: CANCELLED_STATUS }
-    }).lean()
-  ]);
-
-  const currentServing = queue ? queue.currentServing : 0;
-  if (!shift) {
-    return {
-      shiftId: String(shiftId),
-      currentServing,
-      totalPatients: patients.length,
-      patients
-    };
-  }
-
-  const { slotIndexByTime } = buildSlotIndexMap(shift.startTime, shift.endTime, SLOT_MINUTES);
-  const orderedPatients = attachQueueNumbers(patients, slotIndexByTime)
-    .sort((a, b) => a.queueNumber - b.queueNumber);
-
-  return {
-    shiftId: String(shiftId),
-    currentServing,
-    totalPatients: orderedPatients.length,
-    patients: orderedPatients
-  };
+function normalizeStatusInput(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'in_progress') return 'in-progress';
+  return normalized;
 }
 
-async function emitShiftBookingUpdated(shiftId) {
-  try {
-    const io = getIo();
-    const snapshot = await buildShiftQueueSnapshot(shiftId);
-    io.to(String(shiftId)).emit('bookingUpdated', snapshot);
-  } catch (error) {
-    console.error('Failed to emit bookingUpdated event:', error.message);
+async function syncQueueStateWithInProgressAppointment(appointment) {
+  const queueNumber = Number(appointment?.queueNumber);
+  const shiftId = appointment?.shiftId;
+
+  if (!shiftId || !Number.isInteger(queueNumber) || queueNumber <= 0) {
+    return null;
   }
+
+  return QueueState.findOneAndUpdate(
+    { shiftId },
+    { $set: { currentServing: queueNumber } },
+    { new: true, upsert: true }
+  ).lean();
 }
 
 async function createAppointmentNotifications(appointment) {
@@ -189,9 +179,9 @@ router.get('/doctor/:doctorId', async (req, res) => {
 });
 
 /* --------------------------------------------------
-   2. Get available slots for a doctor on a date/shift
+   2. Get available slot and patients before that slot
 -------------------------------------------------- */
-router.get('/available-slots', async (req, res) => {
+router.get('/slot', async (req, res) => {
   try {
     const { doctorId, date, shiftId } = req.query;
 
@@ -210,8 +200,8 @@ router.get('/available-slots', async (req, res) => {
       return res.status(400).json({ message: 'This shift does not belong to the given doctorId' });
     }
 
-    const normalizedShiftDate = normalizeIsoDate(shift.date);
-    const normalizedQueryDate = normalizeIsoDate(date);
+    const normalizedShiftDate = normalizeDateOnly(shift.date);
+    const normalizedQueryDate = normalizeDateOnly(date);
     if (!normalizedShiftDate || !normalizedQueryDate || normalizedShiftDate !== normalizedQueryDate) {
       return res.status(400).json({ message: 'Given date does not match shift date' });
     }
@@ -219,19 +209,17 @@ router.get('/available-slots', async (req, res) => {
     if (shift.status === 'ended') {
       return res.json({
         doctorId,
-        date,
+        date: normalizedQueryDate,
         shiftId,
-        slotDurationMinutes: SLOT_MINUTES,
-        totalSlots: 0,
-        bookedSlots: [],
-        freeSlots: []
+        nextAvailableTime: null,
+        patientsBefore: 0
       });
     }
 
     const allSlots = buildSlots(shift.startTime, shift.endTime, SLOT_MINUTES);
     const bookedAppointments = await Appointment.find({
       doctorId,
-      date,
+      date: normalizedQueryDate,
       shiftId,
       status: { $ne: CANCELLED_STATUS }
     })
@@ -243,16 +231,16 @@ router.get('/available-slots', async (req, res) => {
     );
 
     const freeSlots = allSlots.filter((slot) => !bookedSet.has(normalizeTimeLabel(slot)));
-    const bookedSlots = allSlots.filter((slot) => bookedSet.has(normalizeTimeLabel(slot)));
+    
+    const nextAvailableTime = freeSlots.length > 0 ? freeSlots[0] : null;
+    const patientsBefore = nextAvailableTime ? allSlots.indexOf(nextAvailableTime) : allSlots.length;
 
     return res.json({
       doctorId,
-      date,
+      date: normalizedQueryDate,
       shiftId,
-      slotDurationMinutes: SLOT_MINUTES,
-      totalSlots: allSlots.length,
-      bookedSlots,
-      freeSlots
+      nextAvailableTime,
+      patientsBefore
     });
   } catch (error) {
     console.error(error);
@@ -323,8 +311,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const normalizedShiftDate = normalizeIsoDate(shift.date);
-    const normalizedAppointmentDate = normalizeIsoDate(appointmentData.date);
+    const normalizedShiftDate = normalizeDateOnly(shift.date);
+    const normalizedAppointmentDate = normalizeDateOnly(appointmentData.date);
     if (!normalizedShiftDate || !normalizedAppointmentDate || normalizedShiftDate !== normalizedAppointmentDate) {
       return res.status(400).json({
         message: 'Appointment date must match shift date'
@@ -358,19 +346,21 @@ router.post('/', async (req, res) => {
         message: 'Selected time has already passed in the queue'
       });
     }
-    const normalizedIncomingStatus = String(appointmentData.status || 'pending').trim().toLowerCase();
+    const normalizedIncomingStatus = normalizeStatusInput(appointmentData.status || 'pending');
     const finalStatus = ALLOWED_STATUSES.includes(normalizedIncomingStatus)
       ? normalizedIncomingStatus
       : 'pending';
 
     const newAppointment = new Appointment({
       ...appointmentData,
+      date: normalizedAppointmentDate,
       status: finalStatus,
       queueNumber
     });
 
     const saved = await newAppointment.save();
     const appointment = saved.toObject();
+    emitAppointmentEvent(EVENTS.APPOINTMENT_CREATED, appointment);
     await emitShiftBookingUpdated(appointmentData.shiftId);
     await createAppointmentNotifications(appointment);
 
@@ -449,7 +439,7 @@ router.put('/:id/status', async (req, res) => {
     const { status, consultationNotes } = req.body;
     const hasConsultationNotes = Object.prototype.hasOwnProperty.call(req.body, 'consultationNotes');
     if (!status) return res.status(400).json({ error: 'Status is required' });
-    const normalizedStatus = String(status).trim().toLowerCase();
+    const normalizedStatus = normalizeStatusInput(status);
     if (!ALLOWED_STATUSES.includes(normalizedStatus)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
@@ -466,7 +456,7 @@ router.put('/:id/status', async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const previousStatus = String(existing.status || '').trim().toLowerCase();
+    const previousStatus = normalizeStatusInput(existing.status);
     existing.status = normalizedStatus;
 
     if (hasConsultationNotes) {
@@ -476,13 +466,49 @@ router.put('/:id/status', async (req, res) => {
     }
 
     const updated = await existing.save();
+    const updatedPayload = updated.toObject();
 
-    await createAppointmentStatusNotifications(updated.toObject(), previousStatus);
+    await createAppointmentStatusNotifications(updatedPayload, previousStatus);
+
+    if (normalizedStatus === IN_PROGRESS_STATUS) {
+      const queue = await syncQueueStateWithInProgressAppointment(updatedPayload);
+      if (queue) {
+        emitQueueUpdated({
+          shiftId: updated.shiftId,
+          currentServing: queue.currentServing,
+          currentAppointment: updatedPayload
+        });
+      }
+    }
 
     const wasCancelled = previousStatus === CANCELLED_STATUS;
     const isCancelled = normalizedStatus === CANCELLED_STATUS;
     if (isCancelled || (wasCancelled && !isCancelled)) {
       await emitShiftBookingUpdated(updated.shiftId);
+    }
+
+    if (previousStatus !== normalizedStatus) {
+      emitAppointmentEvent(EVENTS.APPOINTMENT_UPDATED, updatedPayload, {
+        previousStatus
+      });
+
+      if (normalizedStatus === CANCELLED_STATUS) {
+        emitAppointmentEvent(EVENTS.APPOINTMENT_CANCELLED, updatedPayload, {
+          previousStatus
+        });
+      }
+
+      if (normalizedStatus === IN_PROGRESS_STATUS) {
+        emitAppointmentEvent(EVENTS.CONSULTATION_STARTED, updatedPayload, {
+          previousStatus
+        });
+      }
+
+      if (normalizedStatus === 'completed') {
+        emitAppointmentEvent(EVENTS.CONSULTATION_ENDED, updatedPayload, {
+          previousStatus
+        });
+      }
     }
 
     res.json(updated);
@@ -548,6 +574,10 @@ router.put('/:id', async (req, res) => {
 
     // Notify if status changed
     await createAppointmentStatusNotifications(updated.toObject(), previousStatus);
+
+    if (String(updated.status || '').trim().toLowerCase() === IN_PROGRESS_STATUS) {
+      await syncQueueStateWithInProgressAppointment(updated.toObject());
+    }
 
     // Emit booking update if cancellation toggled
     const wasCancelled = previousStatus === CANCELLED_STATUS;

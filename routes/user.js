@@ -7,6 +7,7 @@ const Patient = require('../models/patient');
 const Doctor = require('../models/doctor');
 const { requireAuth } = require('../auth/auth.middleware');
 const { uploadImageBuffer } = require('../services/cloudinary');
+const { sendEmail } = require('../services/email.service');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -133,6 +134,32 @@ router.post('/toggle-favorite', async (req, res) => {
     return res.status(500).json({
       message: 'Internal server error'
     });
+  }
+});
+
+router.post('/contact', async (req, res) => {
+  try {
+    const { name, contactNumber, email, subject, message } = req.body;
+    
+    if (!name || !contactNumber || !email || !subject || !message) {
+      return res.status(400).json({
+        error: 'All fields (name, contactNumber, email, subject, message) are required'
+      });
+    }
+    
+    const emailText = `Name: ${name}\nContact Number: ${contactNumber}\nEmail: ${email}\n\nMessage:\n${message}`;
+    const recipient = [process.env.SMTP_USER];
+    
+    await sendEmail({
+      to: recipient,
+      subject: subject,
+      text: emailText
+    });
+
+    return res.status(200).json({ message: 'Email sent successfully' });
+  } catch (error) {
+    console.error('Error sending contact email:', error);
+    return res.status(500).json({ error: 'Failed to send email' });
   }
 });
 

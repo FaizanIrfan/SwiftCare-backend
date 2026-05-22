@@ -40,9 +40,6 @@ const doctorSchema = new mongoose.Schema(
     },
 
     location: {
-      clinicName: {
-        type: String
-      },
       label: {
         type: String
       },

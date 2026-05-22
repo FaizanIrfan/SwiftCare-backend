@@ -20,7 +20,9 @@ const { setIo } = require('./socket/io');
 const appointmentRoutes = require('./routes/appointments');
 const shiftRoutes = require('./routes/shifts');
 const notificationRoutes = require('./routes/notifications');
+const facilityRoutes = require('./routes/facilities');
 const { startNotificationScheduler } = require('./services/notificationScheduler');
+const { initFirebaseAdmin } = require('./services/pushNotification.service');
 
 const app = express();
 let isShuttingDown = false;
@@ -65,9 +67,9 @@ MongoDB
 -------------------------------------------------- */
 
 mongoose.connect(process.env.MONGO_URI, {
-  dbName: "SwiftCare"
+  dbName: "PerfectData"
 })
-.then(() => console.log("MongoDB Connected to SwiftCare"))
+.then(() => console.log("MongoDB Connected to PerfectData"))
 .catch(err => {
   console.error("MongoDB connection error:", err);
   process.exit(1);
@@ -90,6 +92,7 @@ app.use('/patients', patientRoutes);
 app.use('/appointments', appointmentRoutes);
 app.use('/shifts', shiftRoutes);
 app.use('/notifications', notificationRoutes);
+app.use('/facilities', facilityRoutes);
 app.use('/uploads', express.static('uploads'));
 
 
@@ -132,6 +135,7 @@ const io = new Server(server, {
 initSocket(io);
 setIo(io);
 startNotificationScheduler();
+initFirebaseAdmin();
 
 
 /* --------------------------------------------------

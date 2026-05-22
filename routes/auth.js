@@ -309,7 +309,7 @@ router.post('/signup', async (req, res) => {
       } else {
         const doctor = await Doctor.create({
           name,
-          specialization: 'General Physician',
+          specialization: 'Physician',
           location: {
             label: locationLabel,
             geo: {
@@ -322,7 +322,7 @@ router.post('/signup', async (req, res) => {
             availableHours
           },
           accountStatus: {
-            registered: true,
+            registered: false,
             verificationStatus: 'pending'
           },
           credentials: {

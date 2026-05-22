@@ -5,8 +5,8 @@ const Appointment = require('../models/appointment');
 const Shift = require('../models/shift');
 const Notification = require('../models/notification');
 const { requireAuth, requireRole } = require('../auth/auth.middleware');
-const { getIo } = require('../socket/io');
 const { createNotification } = require('../services/notification.service');
+const { emitQueueUpdated } = require('../services/realtimeEvents');
 const {
     SLOT_MINUTES,
     buildSlotIndexMap,
@@ -220,16 +220,11 @@ router.post('/next', requireRole('doctor'), async (req, res) => {
             return res.status(409).json({ message: 'Queue was updated by another request, please retry' });
         }
 
-        // Broadcast the update to all patients in this shift
-        try {
-            const io = getIo();
-            io.to(shiftId.toString()).emit('queueUpdated', {
-                shiftId: shiftId,
-                currentServing: updatedQueue.currentServing
-            });
-        } catch (socketError) {
-            console.error('Failed to emit queueUpdated event:', socketError.message);
-        }
+        emitQueueUpdated({
+            shiftId,
+            currentServing: updatedQueue.currentServing,
+            currentAppointment: nextAppointment
+        });
 
         await notifyQueueProgress(shift, slotIndexByTime, updatedQueue.currentServing);
 
