@@ -2,6 +2,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
 const Doctor = require('../models/doctor');
+const Facility = require('../models/facility');
+const Appointment = require('../models/appointment');
+const Review = require('../models/review');
+const Shift = require('../models/shift');
 const { requireAuth } = require('../auth/auth.middleware');
 const {
   validateDoctorSchedule,
@@ -65,6 +69,55 @@ router.get('/:id', async (req, res) => {
   const d = await Doctor.findById(req.params.id);
   if (!d) return res.status(404).json({ error: "Doctor not found" });
   res.json(d);
+});
+
+/* --------------------------------------------------
+   Delete doctor
+-------------------------------------------------- */
+
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const actorRole = req.user?.role;
+    if (actorRole !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid doctor ID format' });
+    }
+
+    const doctor = await Doctor.findById(id);
+    if (!doctor) {
+      return res.status(404).json({ error: 'Doctor not found' });
+    }
+
+    const [facilityResult, appointmentResult, reviewResult, shiftResult, deletedDoctor] = await Promise.all([
+      Facility.updateMany(
+        { doctorList: id },
+        { $pull: { doctorList: id } }
+      ),
+      Appointment.deleteMany({ doctorId: id }),
+      Review.deleteMany({ doctorId: id }),
+      Shift.deleteMany({ doctorId: id }),
+      Doctor.deleteOne({ _id: id })
+    ]);
+
+    return res.json({
+      success: true,
+      message: 'Doctor deleted successfully',
+      deletedDoctorCount: deletedDoctor.deletedCount || 0,
+      cleanedUp: {
+        facilitiesUpdated: facilityResult.modifiedCount || 0,
+        appointmentsDeleted: appointmentResult.deletedCount || 0,
+        reviewsDeleted: reviewResult.deletedCount || 0,
+        shiftsDeleted: shiftResult.deletedCount || 0,
+      }
+    });
+  } catch (e) {
+    console.error('Error deleting doctor:', e);
+    return res.status(500).json({ error: 'Failed to delete doctor', details: e.message });
+  }
 });
 
 /* --------------------------------------------------

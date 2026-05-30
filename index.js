@@ -21,6 +21,8 @@ const appointmentRoutes = require('./routes/appointments');
 const shiftRoutes = require('./routes/shifts');
 const notificationRoutes = require('./routes/notifications');
 const facilityRoutes = require('./routes/facilities');
+const locationRoutes = require('./routes/location');
+const mapboxRoutes = require('./routes/mapbox');
 const { startNotificationScheduler } = require('./services/notificationScheduler');
 const { initFirebaseAdmin } = require('./services/pushNotification.service');
 
@@ -93,6 +95,8 @@ app.use('/appointments', appointmentRoutes);
 app.use('/shifts', shiftRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/facilities', facilityRoutes);
+app.use('/api/location', locationRoutes);
+app.use('/api/mapbox', mapboxRoutes);
 app.use('/uploads', express.static('uploads'));
 
 

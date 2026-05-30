@@ -23,6 +23,14 @@ const doctorSchema = new mongoose.Schema(
       type: String
     },
 
+    age: {
+      type: String
+    },
+
+    gender: {
+      type: String
+    },
+
     experience: {
       type: String   // "8+" → keep as String
     },
@@ -130,6 +138,17 @@ const doctorSchema = new mongoose.Schema(
       degreeCert: String,
       regCert: String,
       otherCerts: [String]
+    },
+      // Hospital affiliation chosen during verification
+    hospitalAffiliation: {
+      affiliationType: {
+        type: String,
+        enum: ['na', 'registered', 'other'],
+        default: 'na'
+      },
+      hospitalId: String,
+      hospitalName: String,
+      hospitalLocation: String
     },
   },
   { timestamps: true }

@@ -95,7 +95,6 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required and must be a non-empty string' });
     }
-
     // Process and validate location
     let processedLocation = undefined;
     if (location) {
@@ -119,6 +118,7 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     const newFacility = new Facility({
       name: name.trim(),
       about: about ? String(about).trim() : '',
+      image: req.body.image ? String(req.body.image).trim() : undefined,
       location: processedLocation,
       doctorList: processedDoctors
     });
@@ -200,7 +200,6 @@ router.get('/:id', async (req, res) => {
     }
 
     return res.json(facility);
-
   } catch (error) {
     console.error('Error fetching facility by ID:', error);
     return res.status(500).json({ error: 'Failed to fetch facility', details: error.message });
@@ -347,6 +346,47 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting facility:', error);
     return res.status(500).json({ error: 'Failed to delete facility', details: error.message });
+  }
+});
+
+/* =========================================================================
+  4. Nearby Facilities
+   GET /nearby
+   ========================================================================= */
+
+router.get('/nearby', requireAuth, async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    const parsedLat = Number.parseFloat(lat);
+    const parsedLng = Number.parseFloat(lng);
+
+    if (
+      !Number.isFinite(parsedLat) ||
+      !Number.isFinite(parsedLng) ||
+      parsedLat < -90 ||
+      parsedLat > 90 ||
+      parsedLng < -180 ||
+      parsedLng > 180
+    ) {
+      return res.status(400).json({ error: 'lat and lng are required valid coordinates' });
+    }
+
+    const facilities = await Facility.find({
+      'location.geo': {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parsedLng, parsedLat]
+          },
+          $maxDistance: 5000
+        }
+      }
+    });
+
+    res.json(facilities);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

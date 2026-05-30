@@ -11,6 +11,11 @@ const facilitySchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    image: {
+      type: String,
+      trim: true,
+      default: null
+    },
     location: {
       label: {
         type: String,
@@ -19,18 +24,10 @@ const facilitySchema = new mongoose.Schema(
       geo: {
         type: {
           type: String,
-          enum: ["Point"],
           default: "Point"
         },
         coordinates: {
           type: [Number], // [longitude, latitude]
-          required: true,
-          validate: {
-            validator: function(v) {
-              return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number';
-            },
-            message: 'Coordinates must be an array of two numbers'
-          }
         }
       }
     },
@@ -44,6 +41,8 @@ const facilitySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes to support geolocation queries (like doctor's nearSphere queries)
 facilitySchema.index({ 'location.geo': "2dsphere" });
+facilitySchema.index({ 'location.coordinates': "2dsphere" });
 
 module.exports = mongoose.model('Facility', facilitySchema, 'facilities');

@@ -114,6 +114,8 @@ router.post('/submit', requireAuth, upload.fields([
         // Parse JSON strings from form data
         const identification = safeParse(req.body.identification, {}, 'identification', res);
         if (!identification) return;
+        const personalInfo = safeParse(req.body.personalInfo, {}, 'personalInfo', res);
+        if (!personalInfo) return;
         const professionalInfo = safeParse(req.body.professionalInfo, {}, 'professionalInfo', res);
         if (!professionalInfo) return;
         const scheduleInfo = safeParse(req.body.schedule, {}, 'schedule', res);
@@ -130,6 +132,8 @@ router.post('/submit', requireAuth, upload.fields([
 
         // Update the doctor document
         doctor.image = profilePic || doctor.image;
+        if (personalInfo.age) doctor.age = String(personalInfo.age);
+        if (personalInfo.gender) doctor.gender = String(personalInfo.gender);
         doctor.identification = {
             ...(doctor.identification || {}),
             ...identification
