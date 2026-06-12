@@ -180,6 +180,29 @@ function parseShiftEndDateTime(shift) {
   return new Date(year, month, day, hour, minute, 0, 0);
 }
 
+function parseShiftStartDateTime(shift) {
+  const dateStr = String(shift.date || '').trim();
+  const timeStr = String(shift.startTime || '').trim();
+  if (!dateStr || !timeStr) return null;
+
+  const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!dateMatch || !timeMatch) return null;
+
+  let hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const meridiem = timeMatch[3].toUpperCase();
+
+  if (hour === 12) hour = 0;
+  if (meridiem === 'PM') hour += 12;
+
+  const year = Number(dateMatch[1]);
+  const month = Number(dateMatch[2]) - 1;
+  const day = Number(dateMatch[3]);
+
+  return new Date(year, month, day, hour, minute, 0, 0);
+}
+
 async function runStatusUpdateCycle() {
   const now = new Date();
 
@@ -203,6 +226,35 @@ async function runStatusUpdateCycle() {
     }
   } catch (error) {
     console.error('Error auto-updating shifts:', error.message);
+  }
+
+  // 1.5 Shifts: turn 'active' to 'cancelled' if current date > shift date
+  try {
+    const activeShifts = await Shift.find({ status: 'active' }).lean();
+    const activeShiftsToCancel = [];
+
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const localTodayStr = `${year}-${month}-${day}`;
+
+    for (const shift of activeShifts) {
+      if (!shift.date) continue;
+      
+      const shiftDateStr = String(shift.date).trim();
+      if (localTodayStr > shiftDateStr) {
+        activeShiftsToCancel.push(shift._id);
+      }
+    }
+
+    if (activeShiftsToCancel.length > 0) {
+      await Shift.updateMany(
+        { _id: { $in: activeShiftsToCancel } },
+        { $set: { status: 'ended' } }
+      );
+    }
+  } catch (error) {
+    console.error('Error auto-cancelling active shifts:', error.message);
   }
 
   // 2. Appointments: turn 'pending' to 'cancelled' if current date > appointment date
@@ -232,6 +284,73 @@ async function runStatusUpdateCycle() {
     }
   } catch (error) {
     console.error('Error auto-cancelling appointments:', error.message);
+  }
+
+  // 3. Detect shifts that should have started but remain 'scheduled' and notify
+  try {
+    const scheduledShiftsForStart = await Shift.find({ status: 'scheduled' }).lean();
+    for (const shift of scheduledShiftsForStart) {
+      const startDateTime = parseShiftStartDateTime(shift);
+      if (!startDateTime) continue;
+      if (now < startDateTime) continue;
+
+      const alreadyNotified = await Notification.exists({ type: 'shift_late', 'data.shiftId': String(shift._id) });
+      if (alreadyNotified) continue;
+
+      const scheduleLabel = `${shift.date || 'upcoming date'} at ${shift.startTime || 'start time'}`;
+      const doctorName = shift.doctorName || 'your doctor';
+
+      // Notify doctor
+      try {
+        if (shift.doctorId) {
+          await createNotification({
+            userId: shift.doctorId,
+            role: 'doctor',
+            type: 'shift_late',
+            title: 'You are late for your shift',
+            body: `You are late for your shift on ${scheduleLabel}. Patients are waiting. Please attend or update your status.`,
+            data: {
+              shiftId: String(shift._id),
+              date: shift.date,
+              startTime: shift.startTime
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Failed to notify doctor about late shift', { shiftId: String(shift._id), error: err.message });
+      }
+
+      // Notify patients who have appointments in this shift
+      try {
+        const appointments = await Appointment.find({ shiftId: shift._id, status: { $ne: 'cancelled' } }).select({ patientId: 1, date: 1, time: 1 }).lean();
+        const patientIds = new Set();
+        for (const appt of appointments) {
+          if (appt.patientId) patientIds.add(String(appt.patientId));
+        }
+
+        const jobs = [];
+        for (const patientId of patientIds) {
+          jobs.push(createNotification({
+            userId: patientId,
+            role: 'patient',
+            type: 'shift_late',
+            title: 'Doctor Running Late',
+            body: `Reminder: ${doctorName} is running a little late for the shift scheduled on ${scheduleLabel}. Please wait a little longer.`,
+            data: {
+              shiftId: String(shift._id),
+              date: shift.date,
+              startTime: shift.startTime
+            }
+          }));
+        }
+
+        await Promise.allSettled(jobs);
+      } catch (err) {
+        console.error('Failed to notify patients about late shift', { shiftId: String(shift._id), error: err.message });
+      }
+    }
+  } catch (error) {
+    console.error('Error checking for late shifts:', error.message);
   }
 }
 

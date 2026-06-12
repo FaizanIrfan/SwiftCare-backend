@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { askGemini } = require("../services/gemini.service");
 const Doctor = require("../models/doctor");
+const Facilities = require("../models/facility");
 const { requireAuth } = require('../auth/auth.middleware');
 
 router.use(requireAuth);
@@ -16,6 +17,7 @@ router.post("/chat", async (req, res) => {
 
     // 1) Fetch doctors
     const doctors = await Doctor.find().lean();
+    const facilities = await Facilities.find().lean();
 
     // 2) Convert doctors into readable context
     const doctorsContext = doctors.map(d => {
@@ -24,6 +26,15 @@ Doctor Name: ${d.name}
 Specialty: ${d.specialization}
 Available days: ${(d.schedule?.availableDays || []).join(", ")}
 Timings: ${(d.schedule?.availableHours || []).join(", ") || "Not available"}
+`;
+    }).join("\n");
+
+    const facilitiesContext = facilities.map(f => {
+      return `
+Facility Name: ${f.name}
+Location: ${f.location}
+Available days: ${(f.schedule?.availableDays || []).join(", ")}
+Timings: ${(f.schedule?.availableHours || []).join(", ") || "Not available"}
 `;
     }).join("\n");
 
@@ -55,6 +66,9 @@ If doctor or timing is not found, say you do not have that information.
 DOCTOR DATA:
 {{DOCTORS_CONTEXT}}
 
+FACILITY DATA:
+{{FACILITIES_CONTEXT}}
+
 SERVICES:
 - Answer basic medicine questions (use, ingredients, mild symptom relief)
 - Do NOT diagnose diseases
@@ -65,7 +79,7 @@ STYLE:
 Be polite, concise, and accurate.
 Never invent information.
 
-`.replace("{{DOCTORS_CONTEXT}}", doctorsContext);
+`.replace("{{DOCTORS_CONTEXT}}", doctorsContext).replace("{{FACILITIES_CONTEXT}}", facilitiesContext);
 
     // 4) Final prompt
     const finalPrompt = `

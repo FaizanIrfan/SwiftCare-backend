@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const Doctor = require('../models/doctor');
 const Patient = require('../models/patient');
 const EmailOtp = require('../models/emailOtp');
-const { webClient } = require('../auth/google.client');
+const { androidClient, webClient } = require('../auth/google.client');
 const { sendEmail, smtpConfigured } = require('../services/email.service');
 const {
   normalizeStringArray,
@@ -515,7 +515,11 @@ router.post('/google', async (req, res) => {
 
     const ticket = await webClient.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_WEB_CLIENT_ID
+      audience: [
+        process.env.GOOGLE_ANDROID_CLIENT_ID,
+        process.env.GOOGLE_BACKEND_CLIENT_ID,
+        process.env.GOOGLE_WEB_CLIENT_ID
+      ].filter(Boolean)
     });
 
     let user;
@@ -721,11 +725,156 @@ router.post('/reset-password', async (req, res) => {
       purpose: 'password_reset'
     });
 
-    res.json({ message: 'Password updated successfully' });
+    const jwtPayload = {
+      sub: user._id.toString(),
+      role: roleHint
+    };
+
+    const accessToken = signAccessToken(jwtPayload);
+    const refreshToken = signRefreshToken(jwtPayload);
+
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+
+    res.json({
+      message: 'Password updated successfully',
+      refreshToken,
+      accessToken,
+      role: roleHint,
+      userId: user._id
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Password reset failed' });
   }
 });
 
+/* --------------------------------------------------
+   VERIFY RESET OTP
+-------------------------------------------------- */
+
+router.post('/verify-reset-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail || !otp)
+      return res.status(400).json({
+        error: 'Email and OTP required'
+      });
+
+    let user = await Patient.findOne({
+      'credentials.email': normalizedEmail
+    });
+
+    let roleHint = 'patient';
+
+    if (!user) {
+      user = await Doctor.findOne({
+        'credentials.email': normalizedEmail
+      });
+
+      roleHint = 'doctor';
+    }
+
+    if (!user)
+      return res.status(404).json({
+        error: 'User not found'
+      });
+
+    const otpRecord = await EmailOtp.findOne({
+      userId: user._id,
+      email: normalizedEmail,
+      role: roleHint,
+      purpose: 'password_reset',
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord)
+      return res.status(401).json({
+        error: 'OTP expired or invalid'
+      });
+
+    const otpHash = hashOtp(otp);
+
+    if (otpHash !== otpRecord.otpHash)
+      return res.status(401).json({
+        error: 'OTP expired or invalid'
+      });
+
+    res.json({
+      message: 'OTP verified successfully',
+      role: roleHint,
+      userId: user._id
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      error: 'Verification failed'
+    });
+  }
+});
+
+/* --------------------------------------------------
+   UPDATE PASSWORD
+-------------------------------------------------- */
+
+router.post('/update-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail || !newPassword) {
+      return res.status(400).json({
+        error: 'Email and new password required'
+      });
+    }
+
+    let user = await Patient.findOne({
+      'credentials.email': normalizedEmail
+    });
+
+    let userRole = 'patient';
+
+    if (!user) {
+      user = await Doctor.findOne({
+        'credentials.email': normalizedEmail
+      });
+
+      userRole = 'doctor';
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    const saltRounds = 12;
+
+    user.credentials.password = await bcrypt.hash(
+      newPassword,
+      saltRounds
+    );
+
+    await user.save();
+
+    return res.json({
+      message: 'Password updated successfully',
+      role: userRole,
+      userId: user._id
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      error: 'Password update failed'
+    });
+  }
+});
+
 module.exports = router;
+

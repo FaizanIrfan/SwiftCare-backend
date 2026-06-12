@@ -13,6 +13,69 @@ const {
 } = require('../services/shiftScheduler');
 
 /* --------------------------------------------------
+   Create doctor (Admin only)
+-------------------------------------------------- */
+
+router.post('/', requireAuth, async (req, res) => {
+  try {
+    const actorRole = req.user?.role;
+
+    if (actorRole !== 'admin') {
+      return res.status(403).json({
+        error: 'Forbidden'
+      });
+    }
+
+    const payload = { ...req.body };
+
+    delete payload._id;
+
+    // Validate schedule if provided
+    if (payload.schedule) {
+      const availableDays =
+        payload.schedule.availableDays || [];
+
+      const availableHours =
+        payload.schedule.availableHours || [];
+
+      const scheduleValidation = validateDoctorSchedule(
+        availableDays,
+        availableHours
+      );
+
+      if (!scheduleValidation.ok) {
+        return res.status(400).json({
+          error: scheduleValidation.message
+        });
+      }
+    }
+
+    const doctor = await Doctor.create(payload);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Doctor created successfully',
+      doctor
+    });
+  } catch (e) {
+    console.error('Error creating doctor:', e);
+
+    const isValidationError =
+      e instanceof mongoose.Error.ValidationError ||
+      e instanceof mongoose.Error.CastError;
+
+    return res.status(
+      isValidationError ? 400 : 500
+    ).json({
+      error: isValidationError
+        ? 'Invalid doctor data'
+        : 'Internal server error',
+      details: e.message
+    });
+  }
+});
+
+/* --------------------------------------------------
    Read all doctors
 -------------------------------------------------- */
 

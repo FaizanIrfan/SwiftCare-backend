@@ -35,9 +35,6 @@ const patientSchema = new mongoose.Schema(
     image: {
       type: String
     },
-    avatar: {
-      type: String
-    },
 
     favorites: [
       {
