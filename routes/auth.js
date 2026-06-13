@@ -4,7 +4,12 @@ const crypto = require('crypto');
 const Doctor = require('../models/doctor');
 const Patient = require('../models/patient');
 const EmailOtp = require('../models/emailOtp');
-const { androidClient, webClient } = require('../auth/google.client');
+const {
+  androidClient,
+  webClient,
+  webOAuthClient,
+  googleWebRedirectUri,
+} = require('../auth/google.client');
 const { sendEmail, smtpConfigured } = require('../services/email.service');
 const {
   normalizeStringArray,
@@ -496,68 +501,239 @@ router.post('/verify-email-otp', async (req, res) => {
    GOOGLE SIGN-IN
 -------------------------------------------------- */
 
+const GOOGLE_TOKEN_AUDIENCES = [
+  process.env.GOOGLE_ANDROID_CLIENT_ID,
+  process.env.GOOGLE_BACKEND_CLIENT_ID,
+  process.env.GOOGLE_WEB_CLIENT_ID,
+].filter(Boolean);
+
+const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000;
+
+function signGoogleOAuthState(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', process.env.ACCESS_TOKEN_SECRET || 'swiftcare-google-oauth')
+    .update(encoded)
+    .digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+function parseGoogleOAuthState(state) {
+  if (!state || typeof state !== 'string') return null;
+
+  const [encoded, signature] = state.split('.');
+  if (!encoded || !signature) return null;
+
+  const expected = crypto
+    .createHmac('sha256', process.env.ACCESS_TOKEN_SECRET || 'swiftcare-google-oauth')
+    .update(encoded)
+    .digest('base64url');
+
+  if (signature !== expected) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    if (!payload?.ts || Date.now() - payload.ts > GOOGLE_STATE_TTL_MS) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedGoogleReturnUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+
+    return /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname)
+      || /\.railway\.app$/i.test(parsed.hostname)
+      || /\.vercel\.app$/i.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function buildGoogleRedirectError(returnUrl, message) {
+  const target = isAllowedGoogleReturnUrl(returnUrl)
+    ? returnUrl
+    : 'http://localhost:3001/auth/google/callback';
+  const url = new URL(target);
+  url.searchParams.set('googleError', message);
+  return url.toString();
+}
+
+async function authenticateGooglePatient(payload) {
+  const { name, email, sub, picture } = payload;
+
+  let user = await Patient.findOne({ 'credentials.email': email });
+
+  if (!user) {
+    user = await Patient.create({
+      name,
+      image: picture,
+      location: null,
+      phone: null,
+      age: null,
+      gender: null,
+      credentials: {
+        email,
+        password: sub,
+        provider: 'google',
+        emailVerified: true,
+      },
+    });
+  }
+
+  return {
+    user,
+    profile: {
+      name: user.name || name || '',
+      email: user.credentials?.email || email || '',
+    },
+  };
+}
+
+async function issueGoogleAuthSession(res, user, roleHint, profile = {}) {
+  const jwtPayload = {
+    sub: user._id.toString(),
+    role: roleHint,
+  };
+
+  const accessToken = signAccessToken(jwtPayload);
+  const refreshToken = signRefreshToken(jwtPayload);
+
+  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+
+  return {
+    refreshToken,
+    accessToken,
+    role: roleHint,
+    userId: user._id.toString(),
+    name: profile.name || user.name || '',
+    email: profile.email || user.credentials?.email || '',
+  };
+}
+
+async function authenticateGoogleIdToken(idToken, roleHint) {
+  const ticket = await webClient.verifyIdToken({
+    idToken,
+    audience: GOOGLE_TOKEN_AUDIENCES,
+  });
+
+  const payload = ticket.getPayload();
+  if (!payload) throw new Error('Invalid Google token payload');
+
+  if (roleHint === 'patient') {
+    const { user, profile } = await authenticateGooglePatient(payload);
+    return { user, roleHint, profile };
+  }
+
+  throw new Error('Unsupported role for Google sign-in');
+}
+
+router.get('/google/web/start', (req, res) => {
+  try {
+    const roleHint = req.query.roleHint === 'doctor' ? 'doctor' : 'patient';
+    const returnUrl = String(req.query.returnUrl || '').trim();
+
+    if (!process.env.GOOGLE_WEB_CLIENT_SECRET) {
+      return res.status(503).json({
+        error: 'Google web OAuth is not configured on the server. Set GOOGLE_WEB_CLIENT_SECRET in backend .env and register the redirect URI in Google Cloud Console.',
+        redirectUri: googleWebRedirectUri,
+        clientId: process.env.GOOGLE_WEB_CLIENT_ID,
+      });
+    }
+
+    if (!returnUrl || !isAllowedGoogleReturnUrl(returnUrl)) {
+      return res.status(400).json({ error: 'Invalid returnUrl' });
+    }
+
+    const state = signGoogleOAuthState({
+      roleHint,
+      returnUrl,
+      ts: Date.now(),
+      nonce: crypto.randomBytes(16).toString('hex'),
+    });
+
+    const authUrl = webOAuthClient.generateAuthUrl({
+      access_type: 'online',
+      scope: ['openid', 'email', 'profile'],
+      prompt: 'select_account',
+      state,
+    });
+
+    return res.redirect(authUrl);
+  } catch (err) {
+    console.error('[google/web/start]', err);
+    return res.status(500).json({ error: 'Unable to start Google sign-in' });
+  }
+});
+
+router.get('/google/web/callback', async (req, res) => {
+  const fallbackReturnUrl = 'http://localhost:3001/auth/google/callback';
+  let returnUrl = fallbackReturnUrl;
+
+  try {
+    const { code, state, error } = req.query;
+
+    const parsedState = parseGoogleOAuthState(String(state || ''));
+    if (parsedState?.returnUrl && isAllowedGoogleReturnUrl(parsedState.returnUrl)) {
+      returnUrl = parsedState.returnUrl;
+    }
+
+    if (error) {
+      return res.redirect(buildGoogleRedirectError(returnUrl, String(error)));
+    }
+
+    if (!code || !parsedState) {
+      return res.redirect(buildGoogleRedirectError(returnUrl, 'Invalid Google OAuth state'));
+    }
+
+    if (!process.env.GOOGLE_WEB_CLIENT_SECRET) {
+      return res.redirect(buildGoogleRedirectError(returnUrl, 'Google web OAuth is not configured on the server'));
+    }
+
+    const { tokens } = await webOAuthClient.getToken(String(code));
+    const idToken = tokens.id_token;
+
+    if (!idToken) {
+      return res.redirect(buildGoogleRedirectError(returnUrl, 'Google did not return an ID token'));
+    }
+
+    const { user, roleHint, profile } = await authenticateGoogleIdToken(idToken, parsedState.roleHint);
+    const session = await issueGoogleAuthSession(res, user, roleHint, profile);
+
+    const redirectTarget = new URL(returnUrl);
+    redirectTarget.hash = new URLSearchParams({
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      userId: session.userId,
+      role: session.role,
+      name: session.name,
+      email: session.email,
+    }).toString();
+
+    return res.redirect(redirectTarget.toString());
+  } catch (err) {
+    console.error('[google/web/callback]', err);
+    return res.redirect(buildGoogleRedirectError(returnUrl, 'Google authentication failed'));
+  }
+});
+
 router.post('/google', async (req, res) => {
   try {
     const { idToken, roleHint } = req.body;
 
     if (!idToken) return res.status(400).json({ error: 'idToken required' });
 
-    const ticket = await webClient.verifyIdToken({
+    const { user, roleHint: resolvedRole, profile } = await authenticateGoogleIdToken(
       idToken,
-      audience: [
-        process.env.GOOGLE_ANDROID_CLIENT_ID,
-        process.env.GOOGLE_BACKEND_CLIENT_ID,
-        process.env.GOOGLE_WEB_CLIENT_ID
-      ].filter(Boolean)
-    });
+      roleHint === 'doctor' ? 'doctor' : 'patient'
+    );
 
-    let user;
-    if (roleHint === 'patient') {
-      const payload = ticket.getPayload();
-      const { name, email, sub, picture } = payload;
+    const session = await issueGoogleAuthSession(res, user, resolvedRole, profile);
 
-      user = await Patient.findOne({ 'credentials.email': email });
-
-      if (!user) {
-        user = await Patient.create({
-          name,
-          image: picture,
-          location: null,
-          phone: null,
-          age: null,
-          gender: null,
-          credentials: {
-            email,
-            password: sub,
-            provider: 'google',
-            emailVerified: true
-          }
-        });
-      }
-    }
-
-    if (!user)
-      return res.status(400).json({ error: 'Unsupported role for Google sign-in' });
-
-    const jwtPayload = {
-      sub: user._id.toString(),
-      role: roleHint
-    };
-
-    const accessToken = signAccessToken(jwtPayload);
-    const refreshToken = signRefreshToken(jwtPayload);
-
-    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
-
-    res.json({
-      refreshToken,
-      accessToken,
-      role: roleHint,
-      userId: user._id
-    });
-
-    console.log('Success');
-
+    res.json(session);
   } catch (err) {
     console.error(err);
     res.status(401).json({ error: 'Google authentication failed' });
