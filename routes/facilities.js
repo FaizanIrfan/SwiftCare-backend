@@ -183,7 +183,47 @@ router.get('/', async (req, res) => {
 });
 
 /* =========================================================================
-   2b. Read Single Facility
+   2b. Nearby Facilities
+   GET /nearby
+   ========================================================================= */
+router.get('/nearby', requireAuth, async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    const parsedLat = Number.parseFloat(lat);
+    const parsedLng = Number.parseFloat(lng);
+
+    if (
+      !Number.isFinite(parsedLat) ||
+      !Number.isFinite(parsedLng) ||
+      parsedLat < -90 ||
+      parsedLat > 90 ||
+      parsedLng < -180 ||
+      parsedLng > 180
+    ) {
+      return res.status(400).json({ error: 'lat and lng are required valid coordinates' });
+    }
+
+    const facilities = await Facility.find({
+      'location.geo': {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parsedLng, parsedLat]
+          },
+          $maxDistance: 5000
+        }
+      }
+    });
+
+    res.json(facilities);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/* =========================================================================
+   2c. Read Single Facility
    GET /:id
    ========================================================================= */
 router.get('/:id', async (req, res) => {
@@ -346,47 +386,6 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting facility:', error);
     return res.status(500).json({ error: 'Failed to delete facility', details: error.message });
-  }
-});
-
-/* =========================================================================
-  4. Nearby Facilities
-   GET /nearby
-   ========================================================================= */
-
-router.get('/nearby', requireAuth, async (req, res) => {
-  try {
-    const { lat, lng } = req.query;
-    const parsedLat = Number.parseFloat(lat);
-    const parsedLng = Number.parseFloat(lng);
-
-    if (
-      !Number.isFinite(parsedLat) ||
-      !Number.isFinite(parsedLng) ||
-      parsedLat < -90 ||
-      parsedLat > 90 ||
-      parsedLng < -180 ||
-      parsedLng > 180
-    ) {
-      return res.status(400).json({ error: 'lat and lng are required valid coordinates' });
-    }
-
-    const facilities = await Facility.find({
-      'location.geo': {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [parsedLng, parsedLat]
-          },
-          $maxDistance: 5000
-        }
-      }
-    });
-
-    res.json(facilities);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

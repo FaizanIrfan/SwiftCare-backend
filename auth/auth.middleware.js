@@ -19,13 +19,6 @@ exports.requireAuth = (req, res, next) => {
   }
 
   try {
-    // Development convenience: accept a client-only mock admin token
-    // produced by the frontend's hardcoded admin login flow.
-    // This allows local admin actions during development without a real JWT.
-    if (typeof token === 'string' && token.startsWith('mock-admin-token-')) {
-      req.user = { sub: 'admin-id-001', role: 'admin' };
-      return next();
-    }
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
     req.user = decoded;
     next();

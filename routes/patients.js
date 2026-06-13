@@ -84,6 +84,21 @@ router.put('/:id', async (req, res) => {
       }
     });
 
+    // Handle location separately — validate and store as GeoJSON Point
+    if (Object.prototype.hasOwnProperty.call(req.body, 'location') && req.body.location) {
+      const loc = req.body.location;
+      const coords = loc.coordinates || loc.geo?.coordinates;
+      if (Array.isArray(coords) && coords.length === 2) {
+        sanitizedUpdate.location = {
+          label: loc.label || '',
+          type: 'Point',
+          coordinates: coords,
+        };
+      } else if (loc.label) {
+        sanitizedUpdate['location.label'] = loc.label;
+      }
+    }
+
     const updated = await Patient.findByIdAndUpdate(
       req.params.id,
       sanitizedUpdate,
