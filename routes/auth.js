@@ -266,9 +266,6 @@ router.post('/signup', async (req, res) => {
       }
     }
 
-    if (!smtpConfigured)
-      return res.status(500).json({ error: 'Email service not configured' });
-
     const existingPatient = await Patient.findOne({
       'credentials.email': normalizedEmail
     });
@@ -364,28 +361,20 @@ router.post('/signup', async (req, res) => {
       expiresAt
     });
 
-    try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: 'Your SwiftCare verification code',
-        text: `Your verification code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes.`,
-        html: buildOtpEmailHtml({ name, otp, minutes: OTP_TTL_MINUTES })
-      });
-    } catch (emailError) {
-      await EmailOtp.deleteMany({
-        userId,
-        email: normalizedEmail,
-        role: roleHint,
-        purpose: 'signup'
-      });
-      if (createdUser) {
-        if (roleHint === 'patient') {
-          await Patient.deleteOne({ _id: userId });
-        } else {
-          await Doctor.deleteOne({ _id: userId });
-        }
+    console.log(`[DEVELOPMENT] Generated OTP for ${normalizedEmail}: ${otp}`);
+
+    // Try sending email but do not throw or delete user if it fails
+    if (smtpConfigured) {
+      try {
+        await sendEmail({
+          to: normalizedEmail,
+          subject: 'Your SwiftCare verification code',
+          text: `Your verification code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes.`,
+          html: buildOtpEmailHtml({ name, otp, minutes: OTP_TTL_MINUTES })
+        });
+      } catch (emailError) {
+        console.warn('Could not send signup email:', emailError.message);
       }
-      throw emailError;
     }
 
     if (createdUser) {
