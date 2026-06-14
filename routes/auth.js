@@ -271,6 +271,10 @@ router.post('/signup', async (req, res) => {
       }
     }
 
+    if (!smtpConfigured) {
+      return res.status(500).json({ error: 'Email service not configured' });
+    }
+
     const existingPatient = await Patient.findOne({
       'credentials.email': normalizedEmail
     });
@@ -368,19 +372,21 @@ router.post('/signup', async (req, res) => {
 
     console.log(`[DEVELOPMENT] Generated OTP for ${normalizedEmail}: ${otp}`);
 
-    // Try sending email but do not throw or delete user if it fails
-    if (smtpConfigured) {
-      try {
-        await sendEmail({
-          to: normalizedEmail,
-          subject: 'Your SwiftCare verification code',
-          text: `Your verification code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes.`,
-          html: buildOtpEmailHtml({ name, otp, minutes: OTP_TTL_MINUTES })
-        });
-      } catch (emailError) {
-        console.warn('Could not send signup email:', emailError.message);
-      }
-    }
+    res.status(existingUser ? 202 : 201).json({
+      message: 'Verification code sent',
+      email: normalizedEmail,
+      role: roleHint,
+      userId
+    });
+
+    sendEmail({
+      to: normalizedEmail,
+      subject: 'Your SwiftCare verification code',
+      text: `Your verification code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes.`,
+      html: buildOtpEmailHtml({ name, otp, minutes: OTP_TTL_MINUTES })
+    }).catch((emailError) => {
+      console.error(`Could not send signup email to ${normalizedEmail}:`, emailError.message);
+    });
 
     if (createdUser) {
       const adminUserIds = getAdminUserIds();
@@ -390,7 +396,7 @@ router.post('/signup', async (req, res) => {
         ? `${name} registered as a doctor and requires admin review.`
         : `${name} registered as a new patient.`;
 
-      await Promise.allSettled(
+      Promise.allSettled(
         adminUserIds.map((adminUserId) =>
           createNotification({
             userId: adminUserId,
@@ -406,15 +412,10 @@ router.post('/signup', async (req, res) => {
             }
           })
         )
-      );
+      ).catch((notificationError) => {
+        console.error('Could not create signup admin notifications:', notificationError.message);
+      });
     }
-
-    res.status(existingUser ? 202 : 201).json({
-      message: 'Verification code sent',
-      email: normalizedEmail,
-      role: roleHint,
-      userId
-    });
 
   } catch (err) {
     console.error(err);
@@ -505,7 +506,6 @@ const GOOGLE_TOKEN_AUDIENCES = [
   process.env.GOOGLE_ANDROID_CLIENT_ID,
   process.env.GOOGLE_BACKEND_CLIENT_ID,
   process.env.GOOGLE_WEB_CLIENT_ID,
-  process.env.GOOGLE_WEB_CLIENT_SECRET,
 ].filter(Boolean);
 
 const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000;

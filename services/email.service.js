@@ -24,7 +24,10 @@ const getTransporter = () => {
     auth: {
       user: SMTP_USER,
       pass: SMTP_PASS
-    }
+    },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000
   });
 
   return cachedTransporter;
