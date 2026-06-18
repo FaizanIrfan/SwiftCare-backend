@@ -7,6 +7,10 @@ const appointmentSchema = new mongoose.Schema(
       required: true
     },
 
+    patientName: {
+      type: String
+    },
+
     doctorId: {
       type: String,
       required: true
@@ -66,6 +70,12 @@ const appointmentSchema = new mongoose.Schema(
     consultationNotes: {
       type: String,
       default: ''
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'paid'],
+      default: 'pending'
     },
 
     status: {

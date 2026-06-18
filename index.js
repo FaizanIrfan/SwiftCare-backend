@@ -69,7 +69,9 @@ MongoDB
 -------------------------------------------------- */
 
 mongoose.connect(process.env.MONGO_URI, {
-  dbName: "SwiftCare"
+  dbName: 'SwiftCare',
+  serverSelectionTimeoutMS: 10_000,
+  socketTimeoutMS: 20_000
 })
 .then(() => console.log("MongoDB Connected to SwiftCare"))
 .catch(err => {

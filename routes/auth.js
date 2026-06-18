@@ -825,7 +825,11 @@ router.post('/forgot-password', async (req, res) => {
       expiresAt
     });
 
-    await sendEmail({
+    console.log(`[DEVELOPMENT] Generated password-reset OTP for ${normalizedEmail}: ${otp}`);
+
+    res.json({ message: 'If an account exists, a reset code was sent' });
+
+    sendEmail({
       to: normalizedEmail,
       subject: 'Your SwiftCare password reset code',
       text: `Your password reset code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes.`,
@@ -834,9 +838,12 @@ router.post('/forgot-password', async (req, res) => {
         otp,
         minutes: OTP_TTL_MINUTES
       })
+    }).catch((emailError) => {
+      console.error(
+        `Could not send password-reset email to ${normalizedEmail}:`,
+        emailError.message
+      );
     });
-
-    res.json({ message: 'If an account exists, a reset code was sent' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Password reset failed' });
@@ -983,4 +990,3 @@ router.post('/verify-reset-otp', async (req, res) => {
 });
 
 module.exports = router;
-
