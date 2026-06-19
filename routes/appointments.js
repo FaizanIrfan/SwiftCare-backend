@@ -159,6 +159,7 @@ router.use(requireAuth);
 /* --------------------------------------------------
    1. Get all shifts for a doctor
 -------------------------------------------------- */
+
 router.get('/doctor/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -181,6 +182,7 @@ router.get('/doctor/:doctorId', async (req, res) => {
 /* --------------------------------------------------
    2. Get available slot and patients before that slot
 -------------------------------------------------- */
+
 router.get('/slot', async (req, res) => {
   try {
     const { doctorId, date, shiftId } = req.query;
@@ -254,6 +256,7 @@ router.get('/slot', async (req, res) => {
 /* --------------------------------------------------
    3. Create appointment
 -------------------------------------------------- */
+
 router.post('/', async (req, res) => {
   try {
     const appointmentData = req.body;
@@ -276,10 +279,6 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         message: 'doctorId, date, and time are required'
       });
-    }
-
-    if (actorRole !== 'admin' && String(appointmentData.patientId) !== actorUserId) {
-      return res.status(403).json({ message: 'Forbidden: patientId must match authenticated user' });
     }
 
     const patientExists = await Patient.exists({
